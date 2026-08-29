@@ -553,10 +553,18 @@ function genUpd(){ return Date.now(); }
 // 启动同步
 function startSync(){
   if(!sync || !sync.config){ setSyncStatus('未配置云同步', ''); return; }
-  setSyncStatus('正在登录…', '');
+  setSyncStatus('正在连接…', '');
+  // ⚠️ 顺序关键：先用本次配置初始化 Firebase app（否则 firebase.auth() 会报 no-app），再匿名登录
+  let db;
+  try{
+    db = initFirebase(sync.config);
+  }catch(e){
+    syncOn = false;
+    setSyncStatus('初始化失败：' + e.message, 'err');
+    return;
+  }
   ensureAuth().then(()=>{
     try{
-      const db = initFirebase(sync.config);
       dbRef = db.ref(syncPath());
       syncOn = true;
       document.getElementById('syncBtn').classList.add('on');
