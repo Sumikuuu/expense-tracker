@@ -886,8 +886,8 @@ function importBill(){
     rd.onload = () => {
       const buf = rd.result; // ArrayBuffer
       let text = new TextDecoder('utf-8').decode(buf);
-      // 微信默认导出 GBK：若 UTF-8 解码后不含中文字符，则改用 GBK 重解
-      if (!/[\u4e00-\u9fa5]/.test(text)) {
+      // 微信/支付宝账单多为 GBK 编码。utf-8 解码若出现替换符(�)即说明编码不匹配，改用 GBK
+      if (text.includes('\uFFFD') || !/[\u4e00-\u9fa5]/.test(text)) {
         try { text = new TextDecoder('gbk').decode(buf); } catch(e){}
       }
       const recs = parseBill(text);
@@ -905,23 +905,27 @@ function importBill(){
   input.click();
 }
 
-// 通用字段映射：同时兼容 微信 / 支付宝 导出的 CSV
+// 支付宝/微信各类账单通用解析：
+// 兼容两种列结构：
+//   A 交易流水式：交易时间,交易分类/商品说明,收/支,金额(元),支付方式,...
+//   B 记账本明细式：记录时间,分类,收支类型,金额,备注,账户,来源,标签,...
 function parseBill(text){
   const rows = toRows(text);
   if(!rows.length) return [];
-  // 找到表头行（含“交易时间”与“金额”/“收/支”）
-  let hi = rows.findIndex(r => r.some(c => /交易时间/.test(c)) && r.some(c => /金额|收\/支|收支/.test(c)));
-  if(hi < 0) hi = 0;
+  // 找真正的表头行：含“时间”列名 且 含“金额”列名，跳过前面的说明文字
+  let hi = rows.findIndex(r => r.some(c => /时间/.test(c)) && r.some(c => /金额/.test(c)));
+  if(hi < 0) return [];
   const head = rows[hi].map(c => c.trim());
   const idx = {};
   head.forEach((c,i) => {
-    if(/交易时间/.test(c)) idx.time = i;
-    else if(/收\/支|收支|收入|支出/.test(c) && !/金额/.test(c)) idx.flow = i;
+    if(/记录时间|交易时间|时间/.test(c)) idx.time = i;
+    else if(/收支类型|收\/支|收支/.test(c)) idx.flow = i;
     else if(/金额/.test(c)) idx.amt = i;
+    else if(/分类|交易分类/.test(c)) idx.rawcat = i;     // 支付宝自带分类
     else if(/交易对方|对方/.test(c)) idx.party = i;
-    else if(/商品|交易分类|商品说明/.test(c)) idx.desc = i;
-    else if(/支付方式|收\/付款方式|付款方式/.test(c)) idx.pay = i;
-    else if(/备注/.test(c)) idx.note = i;
+    else if(/商品说明|商品|备注/.test(c)) idx.desc = i;
+    else if(/账户|支付方式|收\/付款方式|付款方式/.test(c)) idx.pay = i;
+    else if(/备注$/.test(c)) idx.note = i;
   });
   if(idx.time===undefined || idx.amt===undefined) return [];
   const recs = [];
@@ -930,22 +934,36 @@ function parseBill(text){
     const time = (r[idx.time]||'').trim();
     const rawAmt = (r[idx.amt]||'').trim();
     if(!/^\d{4}-\d{1,2}-\d{1,2}/.test(time) || !rawAmt) continue;
-    const amt = parseFloat(rawAmt.replace(/,/g,'').replace(/[¥￥]/g,''));
+    // 金额可能为负或带 ¥/￥/空格，取绝对值
+    const amt = Math.abs(parseFloat(rawAmt.replace(/,/g,'').replace(/[¥￥]/g,'').trim()));
     if(!isFinite(amt) || amt<=0) continue;
     const flowRaw = (r[idx.flow]||'').trim();
     let type = /收|入|income/i.test(flowRaw) ? 'income' : 'expense';
-    if(/支|出|.expense/.test(flowRaw) && !/收/.test(flowRaw)) type = 'expense';
+    if(/支|出|expense/i.test(flowRaw) && !/收/.test(flowRaw)) type = 'expense';
     const party = (r[idx.party]||'').trim();
-    const desc = (r[idx.desc]||'').trim();
+    const desc = (r[idx.desc||idx.note]||'').trim();
+    const rawcat = (r[idx.rawcat]||'').trim();          // 支付宝分类
     const payRaw = (r[idx.pay]||'').trim();
     const note = (r[idx.note]||'').trim();
-    const category = guessCat(type, party, desc, note);
+    // 分类优先：支付宝自带的分类 > 关键词归
+    const category = (rawcat && mapAlipayCat(rawcat)) || guessCat(type, party, desc, note);
     const channel = guessChannel(payRaw, desc, party);
     const date = time.slice(0,10).replace(/\//g,'-');
     recs.push({ id: genId(), type, amount: amt, category, note: note || desc || party || category,
       date, channel });
   }
   return recs;
+}
+
+// 支付宝分类 → 内置分类
+function mapAlipayCat(c){
+  const m = {
+    '交通':'交通','餐饮':'餐饮','购物':'购物','娱乐':'娱乐','休闲玩乐':'娱乐',
+    '生活日用':'购物','生活服务':'其他','穿搭美容':'购物','生意':'其他',
+    '医疗':'医疗','学习':'学习','居住':'居住','其他':'其他','通讯':'学习',
+    '充值缴费':'居住','酒店旅游':'娱乐','运动户外':'购物'
+  };
+  return m[c] || null;
 }
 
 function toRows(text){
@@ -986,8 +1004,9 @@ function guessCat(type, party, desc, note){
 // 支付方式/描述 → 渠道
 function guessChannel(pay, desc, party){
   const s = pay+desc+party;
+  // 先判支付宝(含“支付宝/小程序”字样)，再判微信，避免“支付宝小程序”被误判
+  if(/支付宝|余额|花呗|收钱码|Alipay/i.test(s)) return '支付宝';
   if(/零钱|微信|WeChat|微信支付/i.test(s)) return '微信零钱';
-  if(/支付宝|余额|花呗|Alipay/i.test(s)) return '支付宝';
   if(/银行卡|储蓄卡|信用卡|借贷|银行|招行|工行|建行|农行/.test(s)) return '银行卡';
   if(/现金/.test(s)) return '现金';
   return '其他';
