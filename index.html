@@ -507,10 +507,17 @@ function loadSync(){
 }
 function persistSync(){ if(sync) localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); else localStorage.removeItem(SYNC_KEY); }
 
-// 用配置初始化 Firebase，并确保已匿名登录（即使规则为“仅登录用户可读写”也能工作）
+// 用配置初始化 Firebase：始终以“本次粘贴的配置”为准，避免绑定到旧 app
 function initFirebase(cfg){
   if(!cfg || !cfg.databaseURL){ throw new Error('缺少 databaseURL'); }
   if(typeof firebase === 'undefined'){ throw new Error('Firebase SDK 未加载'); }
+  // 若已有初始化过的 app，其配置与本次不同则先删除，强制用新配置
+  if(firebase.apps.length){
+    const app0 = firebase.apps[0];
+    if(app0.options && app0.options.databaseURL !== cfg.databaseURL){
+      try{ app0.delete(); }catch(e){}
+    }
+  }
   if(!firebase.apps.length){
     firebase.initializeApp(cfg);
   }
@@ -520,12 +527,13 @@ function initFirebase(cfg){
 function ensureAuth(){
   return new Promise((resolve, reject)=>{
     if(!firebase.auth){ return reject(new Error('Auth SDK 未加载')); }
-    const unsub = firebase.auth().onAuthStateChanged(u => {
+    const auth = firebase.auth();
+    const unsub = auth.onAuthStateChanged(u => {
       if(u){ unsub(); resolve(u); }
     }, reject);
     // 若尚无用户则触发匿名登录
-    if(!firebase.auth().currentUser){
-      firebase.auth().signInAnonymously().catch(reject);
+    if(!auth.currentUser){
+      auth.signInAnonymously().catch(reject);
     }
   });
 }
@@ -572,6 +580,8 @@ function startSync(){
       });
       // 首次主动同步：把本地推上去（保证云端也有）
       pushToCloud();
+      // 连接成功 → 关闭面板（同步工作正常）
+      setTimeout(closeSync, 400);
     }catch(e){
       syncOn = false;
       setSyncStatus('连接失败：' + e.message, 'err');
@@ -637,9 +647,8 @@ function applySync(){
   if(dbRef && syncOn){ try{ dbRef.off(); }catch(e){} }
   syncOn = false;
   document.getElementById('syncBtn').classList.remove('on');
-  closeSync();
+  // 保持面板打开，让用户看到“登录→连接→结果”的实时状态
   startSync();
-  toast('云同步已开启 ✓');
 }
 function disableSync(){
   if(dbRef){ try{ dbRef.off(); }catch(e){} }
