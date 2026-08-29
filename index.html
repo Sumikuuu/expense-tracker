@@ -545,33 +545,41 @@ function genUpd(){ return Date.now(); }
 // 启动同步
 function startSync(){
   if(!sync || !sync.config){ setSyncStatus('未配置云同步', ''); return; }
+  setSyncStatus('正在登录…', '');
   ensureAuth().then(()=>{
     try{
       const db = initFirebase(sync.config);
       dbRef = db.ref(syncPath());
       syncOn = true;
       document.getElementById('syncBtn').classList.add('on');
+      setSyncStatus('已连接，正在同步…', 'ok');
       // 监听远端变化：拉取后合并 → 写本地 & 保留本地缓存
       dbRef.on('value', snap => {
         if(syncing) return;
         const remote = snap.val();
-        if(!remote || !remote.data){ return; }
+        if(!remote){ return; }        // 云端尚无数据，稍后由 pushToCloud 写入
+        if(!remote.data){ return; }
         const merged = mergeArrays(data, remote.data);
         // 若合并后有变化才写本地/渲染
         if(merged.length !== data.length){
           data = merged; save(); renderAll();
         }
+        setSyncStatus('✓ 已连接，自动同步中', 'ok');
+      }, err=>{ // 读取错误（如权限拒绝）——必须显示出来，否则静默失败无从排查
+        syncOn = false;
+        document.getElementById('syncBtn').classList.remove('on');
+        setSyncStatus('读取失败：' + (err && err.message ? err.message : err), 'err');
       });
       // 首次主动同步：把本地推上去（保证云端也有）
       pushToCloud();
-      setSyncStatus('✓ 已连接，自动同步中', 'ok');
     }catch(e){
       syncOn = false;
       setSyncStatus('连接失败：' + e.message, 'err');
     }
   }).catch(e=>{
     syncOn = false;
-    setSyncStatus('登录失败：' + e.message, 'err');
+    document.getElementById('syncBtn').classList.remove('on');
+    setSyncStatus('登录失败：' + (e && e.message ? e.message : e), 'err');
   });
 }
 // 把当前本地数据写入云端
@@ -579,8 +587,12 @@ function pushToCloud(){
   if(!syncOn || !dbRef) return;
   syncing = true;
   dbRef.set({ data: data, budget: budget, updatedAt: Date.now() })
-    .then(()=>{ syncing = false; })
-    .catch(()=>{ syncing = false; });
+    .then(()=>{ syncing = false; setSyncStatus('✓ 已连接，自动同步中', 'ok'); })
+    .catch(err=>{ // 写入失败必须显示，绝不静默
+      syncing = false; syncOn = false;
+      document.getElementById('syncBtn').classList.remove('on');
+      setSyncStatus('写入失败：' + (err && err.message ? err.message : err), 'err');
+    });
 }
 // 在每次本地保存后被调用（防抖）
 let pushTimer = null;
