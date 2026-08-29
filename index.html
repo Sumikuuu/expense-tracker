@@ -11,9 +11,6 @@
 <meta name="theme-color" content="#5b8def">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <script src="vendor/pako.min.js"></script>
-<script src="vendor/firebase-app-compat.js"></script>
-<script src="vendor/firebase-database-compat.js"></script>
-<script src="vendor/firebase-auth-compat.js"></script>
 <style>
   :root{
     --primary:#5b8def;
@@ -267,19 +264,19 @@
   }
   .toast.show{opacity:1;}
 
-  /* ===== 云同步 ===== */
-  #syncBtn{background:rgba(255,255,255,.16);border:none;color:#fff;cursor:pointer;
+  /* ===== 备份 ===== */
+  #backupBtn{background:rgba(255,255,255,.16);border:none;color:#fff;cursor:pointer;
     width:34px;height:34px;border-radius:10px;font-size:16px;line-height:1;margin-left:8px;
     display:inline-flex;align-items:center;justify-content:center;}
-  #syncBtn:active{background:rgba(255,255,255,.3);}
-  #syncBtn.on{background:var(--income);}
-  .sync-status{font-size:13px;color:var(--ink-2);padding:10px 12px;border-radius:10px;
-    background:#eef4ff;margin-bottom:6px;line-height:1.5;}
-  .sync-status.ok{background:#e7f8ef;color:#1c8a52;}
-  .sync-status.err{background:#fdeaea;color:#d33;}
-  .sync-help{font-size:12px;line-height:1.6;color:var(--ink-3);padding:6px 2px;}
-  #firebaseCfg{width:100%;border:1px solid #dfe4ec;background:#fff;border-radius:10px;
-    padding:10px 12px;font-size:12px;font-family:monospace;outline:none;resize:vertical;margin-top:6px;}</style>
+  #backupBtn:active{background:rgba(255,255,255,.3);}
+  .bk-item{display:flex;gap:10px;margin-top:10px;}
+  .bk-item button{flex:1;border:none;border-radius:12px;padding:13px;font-size:14px;
+    font-weight:600;cursor:pointer;}
+  .bk-item .bk-export{background:linear-gradient(135deg,var(--primary),var(--primary-dark));color:#fff;
+    box-shadow:0 2px 10px rgba(91,141,239,.3);}
+  .bk-item .bk-import{background:#fff;color:var(--primary);border:1.5px solid var(--primary);}
+  .bk-tip{font-size:12px;line-height:1.7;color:var(--ink-2);margin-top:12px;
+    background:#f4f7fc;border-radius:10px;padding:10px 12px;}</style>
 </head>
 <body>
 
@@ -291,7 +288,7 @@
       <button id="nextMonth" aria-label="下个月">›</button>
     </div>
     <button id="todayBtn">回到本月</button>
-    <button id="syncBtn" title="云同步">☁️</button>
+    <button id="backupBtn" title="备份 / 恢复">💾</button>
   </div>
   <div class="summary">
     <div class="s-label">本月支出</div>
@@ -417,25 +414,21 @@
 
 <div class="toast" id="toast"></div>
 
-<!-- 云同步设置 -->
-<div class="overlay" id="syncOverlay">
+<!-- 备份 / 恢复 -->
+<div class="overlay" id="backupOverlay">
   <div class="sheet">
     <div class="grab"></div>
-    <h2>☁️ 云同步</h2>
-    <div id="syncStatus" class="sync-status"></div>
-    <div class="field">
-      同步码（各设备填同一个码即共享同一本账，勿外传）
-      <input id="syncCode" type="text" maxlength="32" placeholder="例如：moon-2026">
+    <h2>💾 备份 / 恢复</h2>
+    <div class="bk-item">
+      <button class="bk-export" id="bkExport">⬇️ 导出备份</button>
+      <button class="bk-import" id="bkImport">⬆️ 导入恢复</button>
     </div>
-    <div class="field">
-      连接说明
-      <div class="sync-help" id="syncHelp">
-        ⚠️ 需要先在 Firebase 创建项目并填入下方配置。请对照教程粘贴“配置对象”。
-      </div>
-      <textarea id="firebaseCfg" rows="7" placeholder='{"apiKey":"...","authDomain":"...","databaseURL":"...","projectId":"...","appId":"..."}'></textarea>
+    <div class="bk-tip">
+      📤 <b>导出备份</b>：把当前所有账目保存成一个文件，可发给另一台设备或用微信/隔空投送传送。
+      <br>📥 <b>导入恢复</b>：选择之前导出的文件，把账目合并进来（重复记录会自动跳过）。
+      <br>🔒 数据仅保存在你的设备上，不上传任何服务器。
     </div>
-    <button class="save-btn" id="syncSave">启用同步</button>
-    <button class="delete-btn" id="syncOff" style="display:none;">关闭同步</button>
+    <input type="file" id="bkFile" accept=".json" style="display:none;">
   </div>
 </div>
 
@@ -475,7 +468,7 @@ function load(){
     return Array.isArray(arr) ? arr : [];
   }catch(e){ return []; }
 }
-function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(data)); schedulePush(); }
+function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
 
 function loadBudget(){
   try{
@@ -485,210 +478,74 @@ function loadBudget(){
     return {total: parseFloat(b.total)||0, cats: (b.cats && typeof b.cats==='object') ? b.cats : {} };
   }catch(e){ return {total:0, cats:{}}; }
 }
-function saveBudget(){ localStorage.setItem(BUDGET_KEY, JSON.stringify(budget)); schedulePush(); }
+function saveBudget(){ localStorage.setItem(BUDGET_KEY, JSON.stringify(budget)); }
 function totalBudget(){ return parseFloat(budget.total)||0; }
-function catBudget(name){ return parseFloat(budget.cats && budget.cats[name])||0; }
 
-/* ============ 云同步（Firebase Realtime Database） ============ */
-const SYNC_KEY = 'expense-sync-v1';           // 保存 {config, code}
-let sync = loadSync();
-let dbRef = null;                             // 当前数据库引用
-let syncOn = false;                           // Firebase 是否已初始化成功
-let syncing = false;                          // 同步进行中（防回环锁）
-let remoteMeta = {lastSync:0};                // 记录远端最近一次改动时间
+/* ============ 备份 / 恢复 ============ */
+function openBackup(){ document.getElementById('backupOverlay').classList.add('show'); }
+function closeBackup(){ document.getElementById('backupOverlay').classList.remove('show'); }
 
-function loadSync(){
-  try{
-    const raw = localStorage.getItem(SYNC_KEY);
-    if(!raw) return null;
-    const s = JSON.parse(raw);
-    return (s && s.config && s.code) ? s : null;
-  }catch(e){ return null; }
-}
-function persistSync(){ if(sync) localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); else localStorage.removeItem(SYNC_KEY); }
-
-// 用配置初始化 Firebase：始终以“本次粘贴的配置”为准，避免绑定到旧 app
-function initFirebase(cfg){
-  if(!cfg || !cfg.databaseURL){ throw new Error('缺少 databaseURL'); }
-  if(typeof firebase === 'undefined'){ throw new Error('Firebase SDK 未加载'); }
-  // 若已有初始化过的 app，其配置与本次不同则先删除，强制用新配置
-  if(firebase.apps.length){
-    const app0 = firebase.apps[0];
-    if(app0.options && app0.options.databaseURL !== cfg.databaseURL){
-      try{ app0.delete(); }catch(e){}
-    }
-  }
-  if(!firebase.apps.length){
-    firebase.initializeApp(cfg);
-  }
-  return firebase.database();
-}
-// 匿名登录（无账号），返回 Promise
-function ensureAuth(){
-  return new Promise((resolve, reject)=>{
-    if(!firebase.auth){ return reject(new Error('Auth SDK 未加载')); }
-    const auth = firebase.auth();
-    const unsub = auth.onAuthStateChanged(u => {
-      if(u){ unsub(); resolve(u); }
-    }, reject);
-    // 若尚无用户则触发匿名登录
-    if(!auth.currentUser){
-      auth.signInAnonymously().catch(reject);
-    }
-  });
+// 导出：打包 data + budget 为 JSON 文件下载
+function exportBackup(){
+  const payload = {
+    app: '月度记账',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    budget: budget,
+    data: data
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '记账备份_' + todayStr().replace(/-/g,'') + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  toast('已导出备份文件 ✓');
+  closeBackup();
 }
 
-// 路径：按同步码隔离数据
-function syncPath(){ return 'expense/' + sync.code + '/'; }
-
-// 合并：本地 + 远端，按 id 去重，保留较新 updatedAt；同时用时间戳防覆盖
-function mergeArrays(localArr, remoteArr){
-  const map = new Map();
-  localArr.forEach(t => map.set(t.id, t));
-  (remoteArr||[]).forEach(t => { if(map.has(t.id)){ map.set(t.id, (map.get(t.id).updatedAt||0) >= (t.updatedAt||0) ? map.get(t.id) : t); } else map.set(t.id, t); });
-  return Array.from(map.values());
+// 导入：读取备份 JSON，按 id 去重合并到当前数据
+function importBackup(){
+  const inp = document.getElementById('bkFile');
+  inp.click();
 }
-function genUpd(){ return Date.now(); }
-
-// 启动同步
-function startSync(){
-  if(!sync || !sync.config){ setSyncStatus('未配置云同步', ''); return; }
-  setSyncStatus('正在连接…', '');
-  // ⚠️ 顺序关键：先用本次配置初始化 Firebase app（否则 firebase.auth() 会报 no-app），再匿名登录
-  let db;
-  try{
-    db = initFirebase(sync.config);
-  }catch(e){
-    syncOn = false;
-    setSyncStatus('初始化失败：' + e.message, 'err');
-    return;
-  }
-  ensureAuth().then(()=>{
+function onBackupFile(e){
+  const f = (e.target.files||[])[0];
+  if(!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
     try{
-      dbRef = db.ref(syncPath());
-      syncOn = true;
-      document.getElementById('syncBtn').classList.add('on');
-      setSyncStatus('已连接，正在同步…', 'ok');
-      // 监听远端变化：拉取后合并 → 写本地 & 保留本地缓存
-      dbRef.on('value', snap => {
-        if(syncing) return;
-        const remote = snap.val();
-        if(!remote){ return; }        // 云端尚无数据，稍后由 pushToCloud 写入
-        if(!remote.data){ return; }
-        const merged = mergeArrays(data, remote.data);
-        // 若合并后有变化才写本地/渲染
-        if(merged.length !== data.length){
-          data = merged; save(); renderAll();
-        }
-        setSyncStatus('✓ 已连接，自动同步中', 'ok');
-      }, err=>{ // 读取错误（如权限拒绝）——必须显示出来，否则静默失败无从排查
-        syncOn = false;
-        document.getElementById('syncBtn').classList.remove('on');
-        setSyncStatus('读取失败：' + (err && err.message ? err.message : err), 'err');
+      const obj = JSON.parse(rd.result);
+      const arr = Array.isArray(obj) ? obj : (obj.data||[]);
+      if(!Array.isArray(arr)){ toast('备份文件格式不正确'); return; }
+      let added = 0, skipped = 0;
+      arr.forEach(r => {
+        if(!r || !r.id){ return; }
+        const dup = data.some(t => t.id===r.id || (t.date===r.date && t.amount===r.amount && t.category===r.category));
+        if(dup){ skipped++; }
+        else { data.push(r); added++; }
       });
-      // 首次主动同步：把本地推上去（保证云端也有）
-      pushToCloud();
-      // 连接成功 → 关闭面板（同步工作正常）
-      setTimeout(closeSync, 400);
-    }catch(e){
-      syncOn = false;
-      setSyncStatus('连接失败：' + e.message, 'err');
+      // 同步预算
+      if(obj && obj.budget && typeof obj.budget==='object'){
+        budget = {total: parseFloat(obj.budget.total)||0, cats: (obj.budget.cats||{})};
+        saveBudget();
+      }
+      save();
+      renderAll();
+      toast(`导入完成：新增 ${added} 条，跳过 ${skipped} 条重复`);
+      closeBackup();
+    }catch(err){
+      toast('导入失败：文件解析出错');
     }
-  }).catch(e=>{
-    syncOn = false;
-    document.getElementById('syncBtn').classList.remove('on');
-    setSyncStatus('登录失败：' + (e && e.message ? e.message : e), 'err');
-  });
-}
-// 把当前本地数据写入云端
-function pushToCloud(){
-  if(!syncOn || !dbRef) return;
-  syncing = true;
-  dbRef.set({ data: data, budget: budget, updatedAt: Date.now() })
-    .then(()=>{ syncing = false; setSyncStatus('✓ 已连接，自动同步中', 'ok'); })
-    .catch(err=>{ // 写入失败必须显示，绝不静默
-      syncing = false; syncOn = false;
-      document.getElementById('syncBtn').classList.remove('on');
-      setSyncStatus('写入失败：' + (err && err.message ? err.message : err), 'err');
-    });
-}
-// 在每次本地保存后被调用（防抖）
-let pushTimer = null;
-function schedulePush(){
-  if(!syncOn || !dbRef) return;
-  clearTimeout(pushTimer);
-  pushTimer = setTimeout(pushToCloud, 800);
-}
-function setSyncStatus(txt, cls){
-  const el = document.getElementById('syncStatus');
-  if(el){ el.textContent = txt; el.className = 'sync-status' + (cls?(' '+cls):''); }
+  };
+  rd.readAsText(f, 'utf-8');
+  e.target.value = '';  // 允许重复选择同一文件
 }
 
-// 设置同步弹窗
-function openSync(){
-  const pre = document.getElementById('syncCode');
-  const cfg = document.getElementById('firebaseCfg');
-  document.getElementById('syncCode').value = sync ? sync.code : '';
-  document.getElementById('firebaseCfg').value = sync ? JSON.stringify(sync.config) : '';
-  document.getElementById('syncOff').style.display = sync ? 'block' : 'none';
-  document.getElementById('syncSave').textContent = sync ? '更新同步' : '启用同步';
-  if(syncOn) setSyncStatus('✓ 已连接，自动同步中', 'ok');
-  else if(sync) setSyncStatus('已保存配置，尚未连接', '');
-  else setSyncStatus('未配置', '');
-  document.getElementById('syncOverlay').classList.add('show');
-}
-function closeSync(){ document.getElementById('syncOverlay').classList.remove('show'); }
-
-// 保存同步设置
-function applySync(){
-  const code = document.getElementById('syncCode').value.trim();
-  let cfg = null;
-  try{
-    const raw = document.getElementById('firebaseCfg').value.trim();
-    if(raw){ cfg = (typeof firebaseConfigParse==='function') ? firebaseConfigParse(raw) : JSON.parse(raw); }
-  }catch(e){ setSyncStatus('配置格式错误：' + e.message, 'err'); return; }
-  if(!code){ setSyncStatus('请填写同步码', 'err'); return; }
-  if(!cfg || !cfg.databaseURL){ setSyncStatus('请填写 Firebase 配置（至少含 databaseURL）', 'err'); return; }
-  sync = { config: cfg, code: code };
-  persistSync();
-  // 重新连接
-  if(dbRef && syncOn){ try{ dbRef.off(); }catch(e){} }
-  syncOn = false;
-  document.getElementById('syncBtn').classList.remove('on');
-  // 保持面板打开，让用户看到“登录→连接→结果”的实时状态
-  startSync();
-}
-function disableSync(){
-  if(dbRef){ try{ dbRef.off(); }catch(e){} }
-  sync = null; syncOn = false; dbRef = null;
-  persistSync();
-  document.getElementById('syncBtn').classList.remove('on');
-  document.getElementById('syncOff').style.display = 'none';
-  document.getElementById('syncSave').textContent = '启用同步';
-  setSyncStatus('已关闭云同步', '');
-  toast('云同步已关闭');
-}
-
-// 兼容多种 Firebase 配置文本 → 配置对象。
-// 逐字段提取，不修改原文（避免 URL 里 // 被误删）。支持：
-//   JS对象字面量(const firebaseConfig={...} / 属性名无引号 / 单/双引号 / 尾逗号) 与 纯 JSON
-function firebaseConfigParse(str){
-  if(!str) throw new Error('配置为空');
-  str = String(str);
-  // 移除块注释 /* ... */（URL 里无此形态，安全）
-  str = str.replace(/\/\*[\s\S]*?\*\//g,'');
-  const cfg = {};
-  const take = (key, re) => { const m = str.match(re); if(m && m[1]!==undefined) cfg[key] = m[1].replace(/^['"]|['"]$/g,'').trim(); };
-  take('apiKey', /["']?apiKey["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
-  take('authDomain', /["']?authDomain["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
-  take('databaseURL', /["']?databaseURL["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
-  take('projectId', /["']?projectId["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
-  take('appId', /["']?appId["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
-  take('storageBucket', /["']?storageBucket["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
-  take('messagingSenderId', /["']?messagingSenderId["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
-  if(!cfg.databaseURL) throw new Error('未能识别 databaseURL，请确认已粘贴包含 databaseURL 的配置');
-  return cfg;
-}
+function catBudget(name){ return parseFloat(budget.cats && budget.cats[name])||0; }
 
 function currentMonth(){
   const d = new Date();
@@ -1486,16 +1343,17 @@ function bind(){
   document.getElementById('delBtn').onclick = delEntry;
   overlay.addEventListener('click', e=>{ if(e.target===overlay) closeSheet(); });
 
-  // 云同步
-  document.getElementById('syncBtn').onclick = openSync;
-  document.getElementById('syncSave').onclick = applySync;
-  document.getElementById('syncOff').onclick = disableSync;
-  document.getElementById('syncOverlay').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeSync(); });
+  // 备份 / 恢复
+  document.getElementById('backupBtn').onclick = openBackup;
+  document.getElementById('bkExport').onclick = exportBackup;
+  document.getElementById('bkImport').onclick = importBackup;
+  document.getElementById('bkFile').addEventListener('change', onBackupFile);
+  document.getElementById('backupOverlay').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeBackup(); });
 }
 
 bind();
 renderAll();
-startSync(); // 若已配置同步码，开机自动连接
+
 
 /* ============ 离线/服务 ============ */
 if('serviceWorker' in navigator){
