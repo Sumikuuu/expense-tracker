@@ -101,6 +101,17 @@
   .item .info .cat{font-size:15px;font-weight:600;}
   .item .info .note{font-size:12px;color:var(--ink-3);margin-top:2px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .item .cat .chb{font-size:10px;font-weight:600;margin-left:6px;padding:1px 6px;
+    border-radius:8px;border:1px solid transparent;vertical-align:1px;white-space:nowrap;}
+  .chan-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;}
+  .chan-grid .ch{display:flex;align-items:center;gap:6px;padding:9px 13px;
+    border-radius:20px;border:1.5px solid #e3e8f0;background:#fff;font-size:13px;
+    cursor:pointer;color:var(--ink-2);}
+  .chan-grid .ch .e{font-size:15px;line-height:1;}
+  .chan-grid .ch.sel{border-color:var(--c);background:var(--cgbg);color:var(--c);font-weight:600;}
+  .chan-grid .ch.sel .e{transform:scale(1.05);}
+  #importBtn{margin:0 auto 16px;display:block;padding:10px 18px;border:1px solid var(--primary);
+    background:#fff;color:var(--primary);border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;}
   .item .amt{font-size:16px;font-weight:700;white-space:nowrap;}
   .amt.expense{color:var(--expense);}
   .amt.income{color:var(--income);}
@@ -140,6 +151,10 @@
   .legend .name{flex:1;min-width:0;}
   .legend .pct{font-size:13px;font-weight:600;}
   .legend .amt{font-size:13px;color:var(--ink-2);width:78px;text-align:right;}
+  .chan-sum{display:flex;justify-content:space-between;align-items:center;margin-top:12px;
+    padding:12px 4px 2px;border-top:1px solid #f2f4f8;}
+  .chan-sum .chs-label{font-size:13px;color:var(--ink-2);}
+  .chan-sum .chs-val{font-size:18px;font-weight:700;}
 
   /* ===== Modal ===== */
   .overlay{
@@ -248,6 +263,7 @@
 <main>
   <!-- 记账 tab -->
   <section id="panel-ledger" class="panel active">
+    <button id="importBtn" role="button">📥 导入账单</button>
     <div id="ledgerList"></div>
   </section>
 
@@ -263,6 +279,12 @@
       <h3>支出分类占比</h3>
       <div id="donutWrap"><canvas id="donut" width="220" height="220"></canvas></div>
       <ul class="legend" id="legendList"></ul>
+    </div>
+
+    <div class="card">
+      <h3>各渠道支出</h3>
+      <ul class="legend" id="chanList"></ul>
+      <div class="chan-sum" id="chanSum"></div>
     </div>
   </section>
 </main>
@@ -298,6 +320,11 @@
 
     <div class="field" style="margin-top:4px;">
       <div class="cat-grid" id="catGrid"></div>
+    </div>
+
+    <div class="field">
+      支付渠道
+      <div class="chan-grid" id="chanGrid"></div>
     </div>
 
     <div class="field">
@@ -344,6 +371,13 @@ const CATEGORIES = [
   {name:'居住', emoji:'🏠', color:'#868e96'},
   {name:'其他', emoji:'📦', color:'#adb5bd'},
 ];
+const CHANNELS = [
+  {name:'微信零钱', emoji:'💚', color:'#07c160'},
+  {name:'支付宝', emoji:'💙', color:'#3b6cff'},
+  {name:'银行卡', emoji:'💳', color:'#7c5ef0'},
+  {name:'现金', emoji:'💵', color:'#ff9f43'},
+  {name:'其他', emoji:'🏷️', color:'#adb5bd'},
+];
 const STORE_KEY = 'expense-tracker-v1';
 
 let data = load();
@@ -370,6 +404,8 @@ function todayStr(){
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
 function catName(name){ for(const c of CATEGORIES){ if(c.name===name) return c; } return CATEGORIES[7]; }
+function channelName(n){ for(const c of CHANNELS){ if(c.name===n) return c; } return CHANNELS[4]; }
+function channelColor(n){ return channelName(n).color; }
 function fmt(n){
   const num = parseFloat(n) || 0;
   return num.toLocaleString('zh-CN', {minimumFractionDigits:2, maximumFractionDigits:2});
@@ -416,11 +452,12 @@ function renderLedger(){
     html += `<div class="date-head"><span>${date}</span><span class="g-total">支出 ${fmt(exp)}</span></div>`;
     g.forEach(t => {
       const c = catName(t.category);
+      const ch = channelName(t.channel);
       const signed = (t.type==='income'?'+':'−') + fmt(t.amount);
       html += `<div class="item" data-id="${t.id}">
         <div class="emoji" style="background:${hexA(c.color,.12)}">${c.emoji}</div>
         <div class="info">
-          <div class="cat">${c.name}</div>
+          <div class="cat">${c.name}<span class="chb" style="color:${ch.color};border-color:${hexA(ch.color,.35)};background:${hexA(ch.color,.1)}">${ch.emoji} ${ch.name}</span></div>
           <div class="note">${t.note || (t.type==='income'?'收入':c.name)}</div>
         </div>
         <div class="amt ${t.type==='income'?'income':'expense'}">${signed}</div>
@@ -454,6 +491,28 @@ function renderStats(){
       .map(name => ({name, value:byCat[name]}));
   drawDonut(sorted, exp);
   renderLegend(sorted, exp);
+  renderChannelStats(list, exp);
+}
+
+function renderChannelStats(list, exp){
+  const expList = list.filter(t=>t.type==='expense');
+  const byCh = {};
+  expList.forEach(t => { const ch = t.channel || '其他'; byCh[ch] = (byCh[ch]||0) + (parseFloat(t.amount)||0); });
+  const sorted = Object.keys(byCh).sort((a,b)=>byCh[b]-byCh[a]).map(name=>({name:(channelName(name).name), value:byCh[name]}));
+  const el = document.getElementById('chanList');
+  const sumEl = document.getElementById('chanSum');
+  if(sorted.length===0){ el.innerHTML=''; sumEl.innerHTML=''; return; }
+  el.innerHTML = sorted.map(item => {
+    const ch = channelName(item.name);
+    const pct = exp>0 ? (item.value/exp*100) : 0;
+    return `<li>
+      <span class="dot" style="background:${ch.color}"></span>
+      <span class="name">${ch.emoji} ${ch.name}</span>
+      <span class="pct">${pct.toFixed(1)}%</span>
+      <span class="amt">¥${fmtSci(item.value)}</span>
+    </li>`;
+  }).join('');
+  sumEl.innerHTML = `<div class="chs-label">总计支出</div><div class="chs-val">¥${fmtSci(exp)}</div>`;
 }
 
 function drawDonut(sorted, total){
@@ -509,16 +568,20 @@ function renderLegend(sorted, total){
 /* ============ 添加/编辑 弹窗 ============ */
 const overlay = document.getElementById('overlay');
 let formType = 'expense';
+let formChannel = '其他';
 
 function openSheet(id){
   editingId = id || null;
   setType(id ? (data.find(t=>t.id===id).type) : 'expense');
   setCat(id ? data.find(t=>t.id===id).category : '餐饮');
+  formChannel = id ? (data.find(t=>t.id===id).channel || '其他') : '其他';
   document.getElementById('amount').value = id ? data.find(t=>t.id===id).amount : '';
   document.getElementById('note').value = id ? (data.find(t=>t.id===id).note||'') : '';
   document.getElementById('date').value = id ? data.find(t=>t.id===id).date : todayStr();
   document.getElementById('sheetTitle').textContent = id ? '编辑' : (formType==='expense'?'记一笔支出':'记一笔收入');
   document.getElementById('delBtn').style.display = id ? 'block':'none';
+  renderChannelGrid();
+  setChannel(formChannel);
   overlay.classList.add('show');
 }
 function closeSheet(){ overlay.classList.remove('show'); }
@@ -554,6 +617,21 @@ function setCat(name){
   });
 }
 
+function renderChannelGrid(){
+  const grid = document.getElementById('chanGrid');
+  grid.innerHTML = CHANNELS.map(c=>`<div class="ch" data-name="${c.name}"
+    style="--c:${c.color};--cgbg:${hexA(c.color,.14)}"><span class="e">${c.emoji}</span><span class="n">${c.name}</span></div>`).join('');
+  grid.querySelectorAll('.ch').forEach(el=>{
+    el.addEventListener('click', ()=>{ setChannel(el.dataset.name); });
+  });
+}
+function setChannel(name){
+  formChannel = name;
+  document.querySelectorAll('#chanGrid .ch').forEach(el=>{
+    el.classList.toggle('sel', el.dataset.name===name);
+  });
+}
+
 function toast(msg){
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
@@ -567,7 +645,7 @@ function saveEntry(){
   const note = document.getElementById('note').value.trim();
   const date = document.getElementById('date').value || todayStr();
   const entry = { id: editingId || Date.now().toString(36)+Math.random().toString(36).slice(2,5),
-    type: formType, amount, category: cat, note, date };
+    type: formType, amount, category: cat, note, date, channel: formChannel };
   if(editingId){
     const i = data.findIndex(t=>t.id===editingId);
     if(i>-1) data[i] = entry;
@@ -616,6 +694,130 @@ function renderMonthGrid(){
   }
 }
 
+/* ============ 账单导入 ============ */
+function importBill(){
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.csv,.txt';
+  input.onchange = () => {
+    const f = input.files[0];
+    if(!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      const buf = rd.result; // ArrayBuffer
+      let text = new TextDecoder('utf-8').decode(buf);
+      // 微信默认导出 GBK：若 UTF-8 解码后不含中文字符，则改用 GBK 重解
+      if (!/[\u4e00-\u9fa5]/.test(text)) {
+        try { text = new TextDecoder('gbk').decode(buf); } catch(e){}
+      }
+      const recs = parseBill(text);
+      if(recs.length===0){ toast('未识别到有效的交易记录'); return; }
+      const before = data.length;
+      let added = 0;
+      recs.forEach(r => {
+        if(!isDup(r)){ data.push(r); added++; }
+      });
+      save(); renderAll();
+      toast(`导入成功 ${added} 条${before?`，已跳过重复 ${recs.length-added} 条`:''}`);
+    };
+    rd.readAsArrayBuffer(f);
+  };
+  input.click();
+}
+
+// 通用字段映射：同时兼容 微信 / 支付宝 导出的 CSV
+function parseBill(text){
+  const rows = toRows(text);
+  if(!rows.length) return [];
+  // 找到表头行（含“交易时间”与“金额”/“收/支”）
+  let hi = rows.findIndex(r => r.some(c => /交易时间/.test(c)) && r.some(c => /金额|收\/支|收支/.test(c)));
+  if(hi < 0) hi = 0;
+  const head = rows[hi].map(c => c.trim());
+  const idx = {};
+  head.forEach((c,i) => {
+    if(/交易时间/.test(c)) idx.time = i;
+    else if(/收\/支|收支|收入|支出/.test(c) && !/金额/.test(c)) idx.flow = i;
+    else if(/金额/.test(c)) idx.amt = i;
+    else if(/交易对方|对方/.test(c)) idx.party = i;
+    else if(/商品|交易分类|商品说明/.test(c)) idx.desc = i;
+    else if(/支付方式|收\/付款方式|付款方式/.test(c)) idx.pay = i;
+    else if(/备注/.test(c)) idx.note = i;
+  });
+  if(idx.time===undefined || idx.amt===undefined) return [];
+  const recs = [];
+  for(let i=hi+1; i<rows.length; i++){
+    const r = rows[i];
+    const time = (r[idx.time]||'').trim();
+    const rawAmt = (r[idx.amt]||'').trim();
+    if(!/^\d{4}-\d{1,2}-\d{1,2}/.test(time) || !rawAmt) continue;
+    const amt = parseFloat(rawAmt.replace(/,/g,'').replace(/[¥￥]/g,''));
+    if(!isFinite(amt) || amt<=0) continue;
+    const flowRaw = (r[idx.flow]||'').trim();
+    let type = /收|入|income/i.test(flowRaw) ? 'income' : 'expense';
+    if(/支|出|.expense/.test(flowRaw) && !/收/.test(flowRaw)) type = 'expense';
+    const party = (r[idx.party]||'').trim();
+    const desc = (r[idx.desc]||'').trim();
+    const payRaw = (r[idx.pay]||'').trim();
+    const note = (r[idx.note]||'').trim();
+    const category = guessCat(type, party, desc, note);
+    const channel = guessChannel(payRaw, desc, party);
+    const date = time.slice(0,10).replace(/\//g,'-');
+    recs.push({ id: genId(), type, amount: amt, category, note: note || desc || party || category,
+      date, channel });
+  }
+  return recs;
+}
+
+function toRows(text){
+  const lines = text.split(/\r?\n/);
+  return lines.map(l => {
+    // 粗暴 CSV 分列（支持引号包裹的逗号）
+    const out = []; let cur=''; let inQ=false;
+    for(const ch of l){
+      if(ch===','){ if(inQ){ cur+=ch; } else { out.push(cur.trim()); cur=''; } }
+      else if(ch==='"'){ inQ = !inQ; }
+      else { cur+=ch; }
+    }
+    if(cur.trim()!=='') out.push(cur.trim());
+    return out;
+  }).filter(r => r.length);
+}
+
+// 关键词 → 分类
+function guessCat(type, party, desc, note){
+  if(type==='income'){
+    const s = party+desc+note;
+    if(/工资|薪/.test(s)) return '工资';
+    if(/红包|奖|兼职|结款/.test(s)) return '奖金';
+    if(/转账|收款/.test(s)) return '其他';
+    return '工资';
+  }
+  const s = party+desc+note;
+  if(/餐|饭|美团|饿了么|外卖|奶茶|咖啡|火锅|烧烤|食堂|瑞幸|麦当劳|肯德基|食/.test(s)) return '餐饮';
+  if(/地铁|公交|滴滴|打车|快车|出租|高铁|火车|机票|航空|加油|停车|单车|美团单车|出行|加油/.test(s)) return '交通';
+  if(/购物|淘宝|天猫|京东|拼多多|超市|便利店|商场|专卖|服饰|衣|鞋|裤|帽|百货/.test(s)) return '购物';
+  if(/电影|影院|游戏|KTV|唱吧|会员|视频|音乐|娱乐|景区|门票|展览/.test(s)) return '娱乐';
+  if(/书|课程|学费|培训|学习|考试|文具|教育|网课|资料/.test(s)) return '学习';
+  if(/药|医院|挂号|诊所|体检|医疗|健康/.test(s)) return '医疗';
+  if(/房租|水电|物业|燃气|话费|宽带|快递|居住|房/.test(s)) return '居住';
+  return '其他';
+}
+
+// 支付方式/描述 → 渠道
+function guessChannel(pay, desc, party){
+  const s = pay+desc+party;
+  if(/零钱|微信|WeChat|微信支付/i.test(s)) return '微信零钱';
+  if(/支付宝|余额|花呗|Alipay/i.test(s)) return '支付宝';
+  if(/银行卡|储蓄卡|信用卡|借贷|银行|招行|工行|建行|农行/.test(s)) return '银行卡';
+  if(/现金/.test(s)) return '现金';
+  return '其他';
+}
+
+function genId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function isDup(r){
+  return data.some(t => t.date===r.date && t.amount===r.amount && t.category===r.category && t.note===r.note);
+}
+
 /* ============ 渲染总调度 ============ */
 function renderAll(){
   renderHeader(); renderLedger(); renderStats();
@@ -657,6 +859,9 @@ function bind(){
 
   // FAB
   document.getElementById('fabAdd').onclick = ()=>openSheet(null);
+
+  // 导入账单
+  document.getElementById('importBtn').onclick = importBill;
 
   // 点击列表项编辑
   document.getElementById('ledgerList').addEventListener('click', e=>{
