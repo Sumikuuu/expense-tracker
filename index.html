@@ -63,6 +63,13 @@
   .summary .s-label{font-size:12px;opacity:.9;}
   .summary .s-big{font-size:34px;font-weight:700;letter-spacing:.5px;}
   .summary .s-sub{font-size:12px;opacity:.95;margin-top:4px;}
+  .budget-track{margin-top:12px;height:8px;border-radius:6px;background:rgba(255,255,255,.28);overflow:hidden;}
+  .budget-track .bt-fill{height:100%;width:0%;border-radius:6px;background:#7ce0a8;
+    transition:width .4s ease, background .3s ease;}
+  .budget-track .bt-fill.warn{background:#ffce6b;}
+  .budget-track .bt-fill.over{background:#ff7b7b;}
+  .s-budget{font-size:12px;margin-top:6px;opacity:.95;}
+  .s-budget.over{color:#ffd6d6;font-weight:700;}
 
   /* ===== Tabs ===== */
   nav.tabs{
@@ -155,6 +162,21 @@
     padding:12px 4px 2px;border-top:1px solid #f2f4f8;}
   .chan-sum .chs-label{font-size:13px;color:var(--ink-2);}
   .chan-sum .chs-val{font-size:18px;font-weight:700;}
+
+  /* ===== 预算 ===== */
+  .budget-form label{display:block;font-size:13px;color:var(--ink-2);margin-bottom:4px;}
+  .budget-form > input{width:100%;border:1px solid #dfe4ec;background:#fff;border-radius:10px;
+    padding:11px 12px;font-size:15px;outline:none;margin-bottom:10px;}
+  .budget-cats .bc{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f2f4f8;}
+  .budget-cats .bc:last-child{border-bottom:none;}
+  .budget-cats .bc .bc-emoji{width:26px;text-align:center;font-size:18px;flex-shrink:0;}
+  .budget-cats .bc .bc-name{width:52px;font-size:13px;color:var(--ink);flex-shrink:0;}
+  .budget-cats .bc input{flex:1;border:none;background:transparent;border-bottom:1px dashed #d5dbe6;
+    font-size:14px;color:var(--ink);outline:none;text-align:right;padding:4px 2px;}
+  .budget-cats .bc input.warn{color:var(--expense);font-weight:700;border-bottom-color:var(--expense);}
+
+  #trendWrap{display:flex;justify-content:center;}
+  canvas#trend{width:100%;height:auto;aspect-ratio:640/220;}
 
   /* ===== Modal ===== */
   .overlay{
@@ -257,6 +279,10 @@
     <div class="s-label">本月支出</div>
     <div class="s-big" id="totalExpense">¥0.00</div>
     <div class="s-sub" id="monthSub"></div>
+    <div class="budget-track" id="budgetTrack" style="display:none;">
+      <div class="bt-fill" id="budgetFill"></div>
+    </div>
+    <div class="s-budget" id="budgetLine"></div>
   </div>
 </header>
 
@@ -285,6 +311,20 @@
       <h3>各渠道支出</h3>
       <ul class="legend" id="chanList"></ul>
       <div class="chan-sum" id="chanSum"></div>
+    </div>
+
+    <div class="card">
+      <h3>预算</h3>
+      <div class="budget-form">
+        <label>每月总预算（元）</label>
+        <input id="budgetTotal" type="number" inputmode="decimal" min="0" step="1" placeholder="留空 = 不设">
+        <div class="budget-cats" id="budgetCats"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>近 6 个月支出趋势</h3>
+      <div id="trendWrap"><canvas id="trend" width="640" height="220"></canvas></div>
     </div>
   </section>
 </main>
@@ -379,8 +419,10 @@ const CHANNELS = [
   {name:'其他', emoji:'🏷️', color:'#adb5bd'},
 ];
 const STORE_KEY = 'expense-tracker-v1';
+const BUDGET_KEY = 'expense-budget-v1';
 
 let data = load();
+let budget = loadBudget(); // {total:Number, cats:{Name:Number}}
 let viewMonth = currentMonth(); // YYYY-MM
 let currentTab = 'ledger';
 let editingId = null;
@@ -394,6 +436,18 @@ function load(){
   }catch(e){ return []; }
 }
 function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
+
+function loadBudget(){
+  try{
+    const raw = localStorage.getItem(BUDGET_KEY);
+    if(!raw) return {total:0, cats:{}};
+    const b = JSON.parse(raw);
+    return {total: parseFloat(b.total)||0, cats: (b.cats && typeof b.cats==='object') ? b.cats : {} };
+  }catch(e){ return {total:0, cats:{}}; }
+}
+function saveBudget(){ localStorage.setItem(BUDGET_KEY, JSON.stringify(budget)); }
+function totalBudget(){ return parseFloat(budget.total)||0; }
+function catBudget(name){ return parseFloat(budget.cats && budget.cats[name])||0; }
 
 function currentMonth(){
   const d = new Date();
@@ -431,6 +485,31 @@ function renderHeader(){
   document.getElementById('totalExpense').textContent = '¥' + fmt(exp);
   const inc = sum(list,'income');
   document.getElementById('monthSub').textContent = '收入 ¥' + fmt(inc) + '　·　' + list.length + ' 笔';
+
+  // 本月预算进度
+  const tb = totalBudget();
+  const track = document.getElementById('budgetTrack');
+  const fill = document.getElementById('budgetFill');
+  const line = document.getElementById('budgetLine');
+  if(tb>0){
+    track.style.display='block';
+    const pct = Math.min(exp/tb*100, 100);
+    fill.style.width = pct + '%';
+    fill.classList.remove('warn','over');
+    if(exp>tb){ fill.classList.add('over'); }
+    else if(pct>=80){ fill.classList.add('warn'); }
+    if(exp>tb){
+      line.textContent = `已超支 ¥${fmt(exp-tb)}`;
+      line.classList.add('over');
+    } else {
+      line.textContent = `预算 ${fmt(tb)} · 剩 ¥${fmt(tb-exp)}`;
+      line.classList.remove('over');
+    }
+  } else {
+    track.style.display='none';
+    line.textContent = '';
+    line.classList.remove('over');
+  }
 }
 
 /* ============ 记账列表 ============ */
@@ -492,6 +571,8 @@ function renderStats(){
   drawDonut(sorted, exp);
   renderLegend(sorted, exp);
   renderChannelStats(list, exp);
+  renderBudgetEditor(list, exp);
+  renderTrend();
 }
 
 function renderChannelStats(list, exp){
@@ -513,6 +594,105 @@ function renderChannelStats(list, exp){
     </li>`;
   }).join('');
   sumEl.innerHTML = `<div class="chs-label">总计支出</div><div class="chs-val">¥${fmtSci(exp)}</div>`;
+}
+
+/* 预算编辑器 + 趋势图 */
+function renderBudgetEditor(list, exp){
+  const totalIn = document.getElementById('budgetTotal');
+  // 只在容器隐藏/未聚焦时刷新数值，避免打字被覆盖
+  if(document.activeElement !== totalIn){
+    totalIn.value = totalBudget()>0 ? totalBudget() : '';
+  }
+  // 分类预算行
+  const wrap = document.getElementById('budgetCats');
+  wrap.innerHTML = CATEGORIES.map(c => {
+    const used = list.filter(t=>t.type==='expense' && t.category===c.name)
+      .reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
+    const b = catBudget(c.name);
+    const over = b>0 && used>b;
+    return `<div class="bc">
+      <span class="bc-emoji">${c.emoji}</span>
+      <span class="bc-name">${c.name}</span>
+      <input class="bc-in" data-cat="${c.name}" type="number" inputmode="decimal" min="0" step="1"
+        placeholder="不限" value="${b>0?b:''}" ${over?'style="color:var(--expense);font-weight:700;border-bottom-color:var(--expense);"':''}>
+      <span class="bc-used" style="color:${over?'var(--expense)':'var(--ink-3)'}">${fmtSci(used)}</span>
+    </div>`;
+  }).join('');
+  // 分类预算输入改变（一次性代理事件，挂在外层容器上）
+  wrap.oninput = (e)=>{
+    const inp = e.target.closest('.bc-in');
+    if(!inp) return;
+    const name = inp.dataset.cat;
+    const v = parseFloat(inp.value);
+    if(v>0) budget.cats[name]=v; else delete budget.cats[name];
+    saveBudget();
+    const used = list.filter(t=>t.type==='expense' && t.category===name).reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
+    if(v>0 && used>v){ inp.style.color='var(--expense)'; inp.style.fontWeight='700'; inp.style.borderBottomColor='var(--expense)'; }
+    else { inp.style.color='var(--ink)'; inp.style.fontWeight='400'; inp.style.borderBottomColor='#d5dbe6'; }
+    renderHeader();
+  };
+}
+
+/* 近6个月支出柱状趋势（高清DPR） */
+function renderTrend(){
+  const canvas = document.getElementById('trend');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const W = 640, H = 220;
+  canvas.width = W*dpr; canvas.height = H*dpr;
+  ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,W,H);
+  // 构造最近6个月
+  const now = new Date();
+  const months = [];
+  for(let i=5;i>=0;i--){
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    months.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'));
+  }
+  const vals = months.map(m => sum(monthTransactions(m),'expense'));
+  const maxV = Math.max(1, ...vals);
+  const padL = 46, padR = 14, padT = 22, padB = 30;
+  const innerW = W-padL-padR, innerH = H-padT-padB;
+  // 网格+刻度
+  ctx.strokeStyle='#eef1f6'; ctx.fillStyle='#9aa2af'; ctx.font='10px sans-serif';
+  ctx.textAlign='right'; ctx.textBaseline='middle';
+  for(let g=0; g<=4; g++){
+    const y = padT + innerH - (g/4)*innerH;
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+    ctx.fillStyle='#9aa2af';
+    ctx.fillText('¥' + fmtSci(maxV*g/4), padL-6, y);
+  }
+  // 柱
+  const bw = innerW/vals.length * 0.5;
+  ctx.textAlign='center'; ctx.textBaseline='top';
+  vals.forEach((v,i)=>{
+    const cx = padL + innerW/vals.length*(i+0.5);
+    const barH = (v/maxV)*innerH;
+    const bx = cx-bw/2, by = padT+innerH-barH;
+    const isCur = i===vals.length-1;
+    const grad = ctx.createLinearGradient(0,by,0,padT+innerH);
+    if(isCur){ grad.addColorStop(0,'#5b8def'); grad.addColorStop(1,'#3f6fd6'); }
+    else { grad.addColorStop(0,'#b8ccf5'); grad.addColorStop(1,'#a9c2f0'); }
+    ctx.fillStyle = grad;
+    // 圆角柱
+    roundRect(ctx,bx,by,bw,Math.max(2,barH),Math.min(5,bw/2)); ctx.fill();
+    // 数值
+    ctx.fillStyle='#6b7280';
+    if(v>0) ctx.fillText(fmtSci(v), cx, (by-14)<padT? padT+2 : by-14);
+    // 月份标签
+    ctx.fillStyle= isCur? '#3f6fd6':'#9aa2af'; ctx.font = (isCur?'700 ':'' )+'10px sans-serif';
+    ctx.fillText(months[i].slice(5)+'月', cx, padT+innerH+8);
+  });
+}
+function roundRect(ctx,x,y,w,h,r){
+  r = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
 }
 
 function drawDonut(sorted, total){
@@ -837,6 +1017,14 @@ function bind(){
     renderAll();
   };
   document.getElementById('todayBtn').onclick = ()=>{ viewMonth = currentMonth(); renderAll(); };
+
+  // 总预算输入（一次性绑定）
+  document.getElementById('budgetTotal').addEventListener('input', ()=>{
+    const v = parseFloat(document.getElementById('budgetTotal').value);
+    budget.total = v>0 ? v : 0;
+    saveBudget();
+    renderHeader();
+  });
 
   // 月份选择器
   document.getElementById('monthBtn').onclick = openMonthPicker;
