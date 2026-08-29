@@ -13,6 +13,7 @@
 <script src="vendor/pako.min.js"></script>
 <script src="vendor/firebase-app-compat.js"></script>
 <script src="vendor/firebase-database-compat.js"></script>
+<script src="vendor/firebase-auth-compat.js"></script>
 <style>
   :root{
     --primary:#5b8def;
@@ -506,7 +507,7 @@ function loadSync(){
 }
 function persistSync(){ if(sync) localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); else localStorage.removeItem(SYNC_KEY); }
 
-// 用配置初始化 Firebase
+// 用配置初始化 Firebase，并确保已匿名登录（即使规则为“仅登录用户可读写”也能工作）
 function initFirebase(cfg){
   if(!cfg || !cfg.databaseURL){ throw new Error('缺少 databaseURL'); }
   if(typeof firebase === 'undefined'){ throw new Error('Firebase SDK 未加载'); }
@@ -514,6 +515,19 @@ function initFirebase(cfg){
     firebase.initializeApp(cfg);
   }
   return firebase.database();
+}
+// 匿名登录（无账号），返回 Promise
+function ensureAuth(){
+  return new Promise((resolve, reject)=>{
+    if(!firebase.auth){ return reject(new Error('Auth SDK 未加载')); }
+    const unsub = firebase.auth().onAuthStateChanged(u => {
+      if(u){ unsub(); resolve(u); }
+    }, reject);
+    // 若尚无用户则触发匿名登录
+    if(!firebase.auth().currentUser){
+      firebase.auth().signInAnonymously().catch(reject);
+    }
+  });
 }
 
 // 路径：按同步码隔离数据
@@ -531,29 +545,34 @@ function genUpd(){ return Date.now(); }
 // 启动同步
 function startSync(){
   if(!sync || !sync.config){ setSyncStatus('未配置云同步', ''); return; }
-  try{
-    const db = initFirebase(sync.config);
-    dbRef = db.ref(syncPath());
-    syncOn = true;
-    document.getElementById('syncBtn').classList.add('on');
-    // 监听远端变化：拉取后合并 → 写本地 & 保留本地缓存
-    dbRef.on('value', snap => {
-      if(syncing) return;
-      const remote = snap.val();
-      if(!remote || !remote.data){ return; }
-      const merged = mergeArrays(data, remote.data);
-      // 若合并后有变化才写本地/渲染
-      if(merged.length !== data.length){
-        data = merged; save(); renderAll();
-      }
-    });
-    // 首次主动同步：把本地推上去（保证云端也有）
-    pushToCloud();
-    setSyncStatus('✓ 已连接，自动同步中', 'ok');
-  }catch(e){
+  ensureAuth().then(()=>{
+    try{
+      const db = initFirebase(sync.config);
+      dbRef = db.ref(syncPath());
+      syncOn = true;
+      document.getElementById('syncBtn').classList.add('on');
+      // 监听远端变化：拉取后合并 → 写本地 & 保留本地缓存
+      dbRef.on('value', snap => {
+        if(syncing) return;
+        const remote = snap.val();
+        if(!remote || !remote.data){ return; }
+        const merged = mergeArrays(data, remote.data);
+        // 若合并后有变化才写本地/渲染
+        if(merged.length !== data.length){
+          data = merged; save(); renderAll();
+        }
+      });
+      // 首次主动同步：把本地推上去（保证云端也有）
+      pushToCloud();
+      setSyncStatus('✓ 已连接，自动同步中', 'ok');
+    }catch(e){
+      syncOn = false;
+      setSyncStatus('连接失败：' + e.message, 'err');
+    }
+  }).catch(e=>{
     syncOn = false;
-    setSyncStatus('连接失败：' + e.message, 'err');
-  }
+    setSyncStatus('登录失败：' + e.message, 'err');
+  });
 }
 // 把当前本地数据写入云端
 function pushToCloud(){
