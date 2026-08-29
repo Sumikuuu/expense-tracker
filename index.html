@@ -621,12 +621,25 @@ function disableSync(){
   toast('云同步已关闭');
 }
 
-// 兼容：粘贴 “const firebaseConfig = {...}” 形式的字符串
+// 兼容多种 Firebase 配置文本 → 配置对象。
+// 逐字段提取，不修改原文（避免 URL 里 // 被误删）。支持：
+//   JS对象字面量(const firebaseConfig={...} / 属性名无引号 / 单/双引号 / 尾逗号) 与 纯 JSON
 function firebaseConfigParse(str){
-  str = str.trim();
-  const s = str.indexOf('{'), e = str.lastIndexOf('}');
-  if(s>-1 && e>-1) return JSON.parse(str.slice(s, e+1));
-  return JSON.parse(str);
+  if(!str) throw new Error('配置为空');
+  str = String(str);
+  // 移除块注释 /* ... */（URL 里无此形态，安全）
+  str = str.replace(/\/\*[\s\S]*?\*\//g,'');
+  const cfg = {};
+  const take = (key, re) => { const m = str.match(re); if(m && m[1]!==undefined) cfg[key] = m[1].replace(/^['"]|['"]$/g,'').trim(); };
+  take('apiKey', /["']?apiKey["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
+  take('authDomain', /["']?authDomain["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
+  take('databaseURL', /["']?databaseURL["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
+  take('projectId', /["']?projectId["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
+  take('appId', /["']?appId["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
+  take('storageBucket', /["']?storageBucket["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
+  take('messagingSenderId', /["']?messagingSenderId["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
+  if(!cfg.databaseURL) throw new Error('未能识别 databaseURL，请确认已粘贴包含 databaseURL 的配置');
+  return cfg;
 }
 
 function currentMonth(){
