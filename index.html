@@ -10,6 +10,7 @@
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#5b8def">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
+<script src="vendor/pako.min.js"></script>
 <style>
   :root{
     --primary:#5b8def;
@@ -878,17 +879,24 @@ function renderMonthGrid(){
 function importBill(){
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = '.csv,.txt';
+  input.accept = '.csv,.txt,.xlsx,.xls';
   input.onchange = () => {
     const f = input.files[0];
     if(!f) return;
+    const isXlsx = /\.xlsx$|\.xls$|application\/vnd.openxmlformats|ms-excel|spreadsheet/i.test(f.name + (f.type||''));
     const rd = new FileReader();
     rd.onload = () => {
       const buf = rd.result; // ArrayBuffer
-      let text = new TextDecoder('utf-8').decode(buf);
-      // 微信/支付宝账单多为 GBK 编码。utf-8 解码若出现替换符(�)即说明编码不匹配，改用 GBK
-      if (text.includes('\uFFFD') || !/[\u4e00-\u9fa5]/.test(text)) {
-        try { text = new TextDecoder('gbk').decode(buf); } catch(e){}
+      let text;
+      if(isXlsx){
+        text = parseXlsxText(buf);   // 返回 CSV 文本
+        if(text===null){ toast('无法读取该 Excel 文件'); return; }
+      } else {
+        text = new TextDecoder('utf-8').decode(buf);
+        // 微信/支付宝账单多为 GBK 编码。utf-8 解码若出现替换符(�)即说明编码不匹配，改用 GBK
+        if (text.includes('\uFFFD') || !/[\u4e00-\u9fa5]/.test(text)) {
+          try { text = new TextDecoder('gbk').decode(buf); } catch(e){}
+        }
       }
       const recs = parseBill(text);
       if(recs.length===0){ toast('未识别到有效的交易记录'); return; }
@@ -903,6 +911,148 @@ function importBill(){
     rd.readAsArrayBuffer(f);
   };
   input.click();
+}
+
+// 简单 xlsx→CSV 文本转换（共享字符串 + 序列号日期 → 日期字符串），依赖 pako
+function parseXlsxText(buf){
+  try{
+    // 解析 zip 目录，取每个条目内容
+    const entries = unzip(new Uint8Array(buf));
+    const ssXml = entries['xl/sharedStrings.xml'];
+    if(!entries['xl/worksheets/sheet1.xml']){
+      // 尝试用 rels 定位第一个工作表（多 sheet 场景）
+      const relsRaw = entries['xl/_rels/workbook.xml.rels'] || '';
+      const rels = new TextDecoder('utf-8').decode(relsRaw);
+      const firstRel = (rels.match(/<Relationship[^>]*Target="worksheets\/[^"]*"[^>]*>/)||[''])[0];
+      const target = (firstRel.match(/Target="([^"]*)"/)||[])[1];
+      if(target) entries['xl/worksheets/sheet1.xml'] = entries['xl/'+target];
+    }
+    if(!ssXml || !entries['xl/worksheets/sheet1.xml']) return null;
+    // 解码 XML 为文本再解析（否则 Uint8Array 会 toString 成逗号列表）
+    const ssText = new TextDecoder('utf-8').decode(ssXml);
+    const sheetText = new TextDecoder('utf-8').decode(entries['xl/worksheets/sheet1.xml']);
+    const shared = parseSS(ssText);
+    return sheetToCsv(sheetText, shared);
+  }catch(e){ return null; }
+}
+
+function unzip(u8){
+  // 解析 zip（本地文件头 + 中央目录），用 pako 解压 deflate
+  const entries = {};
+  let p = 0;
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  while(p < u8.length - 4){
+    const sig = dv.getUint32(p, true);
+    if(sig === 0x04034b50){ // local file header
+      const method = dv.getUint16(p+8, true);
+      const csize = dv.getUint32(p+18, true);
+      const usize = dv.getUint32(p+22, true);
+      const nameLen = dv.getUint16(p+26, true);
+      const extraLen = dv.getUint16(p+28, true);
+      const name = new TextDecoder('utf-8').decode(u8.subarray(p+30, p+30+nameLen));
+      const dataStart = p+30+nameLen+extraLen;
+      let content;
+      if(method===8){ content = pako.inflateRaw(new Uint8Array(u8.buffer, u8.byteOffset+dataStart, csize)); }
+      else if(method===0){ content = u8.subarray(dataStart, dataStart+usize); }
+      else { p = dataStart+csize; continue; }
+      entries[name] = content;
+      p = dataStart + csize;
+    } else if(sig === 0x02014b50){ // central dir — stop
+      break;
+    } else {
+      p += 1;
+    }
+  }
+  return entries;
+}
+
+function parseSS(xml){
+  const list = [];
+  const re = /<si[^>]*>([\s\S]*?)<\/si>/g;
+  let m;
+  while((m = re.exec(xml)) !== null){
+    const inner = m[1];
+    const texts = [...inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x => xmlUnescape(x[1]));
+    list.push(texts.join(''));
+  }
+  return list;
+}
+function xmlUnescape(s){
+  return s.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+          .replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(n));
+}
+function cellType(c){ const m = c.match(/t="([^"]*)"/); return m?m[1]:''; }
+function sheetToCsv(xml, shared){
+  const rows = [];
+  const rowRe = /<row[^>]*>([\s\S]*?)<\/row>/g;
+  let rm;
+  while((rm = rowRe.exec(xml)) !== null){
+    const rowXml = rm[1];
+    const cells = [];
+    const cRe = /<c([^>]*)>([\s\S]*?)<\/c>|<c([^>]*)\/>/g;
+    let cm;
+    const cellMap = {};
+    while((cm = cRe.exec(rowXml)) !== null){
+      const attrs = cm[1] || cm[3] || '';
+      const ref = (attrs.match(/r="([^"]*)"/)||[])[1] || '';
+      const colLetter = (ref.match(/[A-Z]+/)||['A'])[0];
+      const colIdx = colLetterToNum(colLetter);
+      const t = cellType(attrs);
+      let val = '';
+      if(cm[2]){ // has <v>
+        const vm = cm[2].match(/<v[^>]*>([\s\S]*?)<\/v>/);
+        const isStr = /<is[^>]*>/.test(cm[2]);
+        if(isStr){
+          const tm = cm[2].match(/<t[^>]*>([\s\S]*?)<\/t>/);
+          val = tm?xmlUnescape(tm[1]):'';
+        } else if(t==='s'){
+          const idx = vm?parseInt(vm[1]):0;
+          val = shared[idx]!==undefined ? shared[idx] : '';
+        } else if(t==='inlineStr'){
+          const tm = cm[2].match(/<t[^>]*>([\s\S]*?)<\/t>/);
+          val = tm?xmlUnescape(tm[1]):'';
+        } else {
+          val = vm?vm[1]:'';
+        }
+      }
+      cellMap[colIdx] = val;
+    }
+    // 填补空列
+    let maxCol = 0;
+    Object.keys(cellMap).forEach(k=>{ if(+k>maxCol) maxCol=+k; });
+    const row = [];
+    for(let i=0;i<=maxCol;i++) row.push(cellMap[i]!==undefined?cellMap[i]:'');
+    rows.push(row);
+  }
+  return rows.map(r => r.map((cv,ci) => normalizeCell(cv,ci)).join(',')).join('\n');
+}
+function colLetterToNum(s){
+  let n=0;
+  for(const ch of s){ n = n*26 + (ch.charCodeAt(0)-64); }
+  return n-1; // 0-based
+}
+// Excel 单元格值 -> 合适字符串。仅对第1列(时间列)把日期序列号转成日期，避免金额被误转
+function normalizeCell(v, ci){
+  if(v==='') return '';
+  if(/^\d+(\.\d+)?$/.test(v)){
+    const n = parseFloat(v);
+    if(ci===0 && n>20000 && n<90000){ return excelDateToStr(n); } // 仅当位于首列且是日期序列号
+    return String(v);
+  }
+  return v;
+}
+function excelDateToStr(serial){
+  // Excel 序列号，(1900-01-01) 1 = 1900-01-01。修正 1900-02-29 bug
+  let d = new Date(Date.UTC(1899,11,30) + Math.floor(serial)*86400000);
+  if(serial < 60) d = new Date(Date.UTC(1899,11,31) + Math.floor(serial)*86400000);
+  const y = d.getUTCFullYear(), mo = String(d.getUTCMonth()+1).padStart(2,'0'), da = String(d.getUTCDate()).padStart(2,'0');
+  return y+'-'+mo+'-'+da;
+}
+
+// 清洗单元格：去掉空占位符（微信用 "/" 表示无值）
+function cleanVal(v){
+  const s = (v||'').trim();
+  return (s==='/'||s==='-'||s==='—'||s==='') ? '' : s;
 }
 
 // 支付宝/微信各类账单通用解析：
@@ -923,9 +1073,10 @@ function parseBill(text){
     else if(/金额/.test(c)) idx.amt = i;
     else if(/分类|交易分类/.test(c)) idx.rawcat = i;     // 支付宝自带分类
     else if(/交易对方|对方/.test(c)) idx.party = i;
-    else if(/商品说明|商品|备注/.test(c)) idx.desc = i;
+    else if(/商品说明|商品/.test(c)) idx.desc = i;        // 商品/商品说明
     else if(/账户|支付方式|收\/付款方式|付款方式/.test(c)) idx.pay = i;
-    else if(/备注$/.test(c)) idx.note = i;
+    else if(/当前状态|交易状态|状态/.test(c)) idx.status = i;  // 微信"当前状态"、支付宝"交易状态"
+    else if(/备注/.test(c)) idx.note = i;                 // 备注
   });
   if(idx.time===undefined || idx.amt===undefined) return [];
   const recs = [];
@@ -938,18 +1089,23 @@ function parseBill(text){
     const amt = Math.abs(parseFloat(rawAmt.replace(/,/g,'').replace(/[¥￥]/g,'').trim()));
     if(!isFinite(amt) || amt<=0) continue;
     const flowRaw = (r[idx.flow]||'').trim();
+    // 中性交易（提现/充值/理财/还款等）：收/支为“/”或空，跳过，不计入收支
+    if(!flowRaw || flowRaw==='/' || flowRaw==='—' || flowRaw==='-') continue;
     let type = /收|入|income/i.test(flowRaw) ? 'income' : 'expense';
     if(/支|出|expense/i.test(flowRaw) && !/收/.test(flowRaw)) type = 'expense';
-    const party = (r[idx.party]||'').trim();
-    const desc = (r[idx.desc||idx.note]||'').trim();
-    const rawcat = (r[idx.rawcat]||'').trim();          // 支付宝分类
-    const payRaw = (r[idx.pay]||'').trim();
-    const note = (r[idx.note]||'').trim();
-    // 分类优先：支付宝自带的分类 > 关键词归
-    const category = (rawcat && mapAlipayCat(rawcat)) || guessCat(type, party, desc, note);
+    const party = cleanVal(r[idx.party]);
+    const desc = cleanVal(r[idx.desc]);
+    const rawcat = cleanVal(r[idx.rawcat]);              // 支付宝分类
+    const payRaw = cleanVal(r[idx.pay]);
+    const status = cleanVal(r[idx.status]);             // 当前状态/交易状态
+    const note = cleanVal(r[idx.note]);
+    const isRefund = /退款|退回|失败，已退还/i.test(status);
+    // 分类优先：支付宝自带的分类 > 关键词归（归类时合并 商品+交易对方，商家名常在对方列）
+    let category = (rawcat && mapAlipayCat(rawcat)) || guessCat(type, party+' '+desc+' '+note+' '+status);
+    if(isRefund) category = '其他';
     const channel = guessChannel(payRaw, desc, party);
     const date = time.slice(0,10).replace(/\//g,'-');
-    recs.push({ id: genId(), type, amount: amt, category, note: note || desc || party || category,
+    recs.push({ id: genId(), type, amount: amt, category, note: note || party || desc || category,
       date, channel });
   }
   return recs;
@@ -981,23 +1137,29 @@ function toRows(text){
   }).filter(r => r.length);
 }
 
-// 关键词 → 分类
-function guessCat(type, party, desc, note){
+// 关键词 → 分类（传入的 s 已合并 交易对方+商品+备注）
+function guessCat(type, s){
   if(type==='income'){
-    const s = party+desc+note;
-    if(/工资|薪/.test(s)) return '工资';
-    if(/红包|奖|兼职|结款/.test(s)) return '奖金';
-    if(/转账|收款/.test(s)) return '其他';
+    if(/退款|退回|极速退款/.test(s)) return '其他';        // 退款/退回是返还，不是收入
+    if(/工资|薪|薪资/.test(s)) return '工资';
+    if(/红包|奖|兼|结款|生意|收钱码|收款/.test(s)) return '奖金';
+    if(/转账/.test(s)) return '其他';
     return '工资';
   }
-  const s = party+desc+note;
-  if(/餐|饭|美团|饿了么|外卖|奶茶|咖啡|火锅|烧烤|食堂|瑞幸|麦当劳|肯德基|食/.test(s)) return '餐饮';
-  if(/地铁|公交|滴滴|打车|快车|出租|高铁|火车|机票|航空|加油|停车|单车|美团单车|出行|加油/.test(s)) return '交通';
-  if(/购物|淘宝|天猫|京东|拼多多|超市|便利店|商场|专卖|服饰|衣|鞋|裤|帽|百货/.test(s)) return '购物';
-  if(/电影|影院|游戏|KTV|唱吧|会员|视频|音乐|娱乐|景区|门票|展览/.test(s)) return '娱乐';
-  if(/书|课程|学费|培训|学习|考试|文具|教育|网课|资料/.test(s)) return '学习';
-  if(/药|医院|挂号|诊所|体检|医疗|健康/.test(s)) return '医疗';
-  if(/房租|水电|物业|燃气|话费|宽带|快递|居住|房/.test(s)) return '居住';
+  // 餐饮：奶茶/咖啡/外卖/快餐/茶饮/便利店零食
+  if(/餐|饭|美团|饿了么|外卖|奶茶|咖啡|火锅|烧烤|食堂|瑞幸|麦当劳|肯德基|食|茶|冰城|蜜雪|饮料|饮品|面包|甜|小吃|面|粉|汉堡|奈雪|喜茶|古茗|7-ELEVEN|美宜佳|便利店|鲜果|果饮/.test(s)) return '餐饮';
+  // 交通：地铁/打车/骑行/加油/停车/出行
+  if(/地铁|公交|滴滴|打车|快车|出租|高铁|火车|机票|航空|加油|停车|单车|哈啰|骑行|出行|先骑后付|先乘车后付款|自动充值|掌上高铁|12306|联运/.test(s)) return '交通';
+  // 娱乐：电影/游戏/会员/视频/音乐/游戏币/月卡/订阅
+  if(/电影|影院|游戏|Steam|Valve|库洛|KTV|唱吧|会员|视频|音乐|娱乐|景区|门票|展览|月相|观察卡|金币|通行证|iCloud|App Store|Apple|Audio|Music|观影|寰宇|账号|月卡|档|游/.test(s)) return '娱乐';
+  // 学习：学费/学校缴费/课程/资料/话费电信
+  if(/书|课程|学费|培训|学习|考试|文具|教育|网课|资料|大学|学校|缴费|平台缴费/.test(s)) return '学习';
+  // 医疗：医院/药店/医保/体检
+  if(/药|医院|挂号|诊所|体检|医疗|健康|医保|就医/.test(s)) return '医疗';
+  // 居住：房租/水电/物业/话费/宽带/快递/寄件
+  if(/房租|水电|物业|燃气|话费|宽带|快递|顺丰|寄件|邮费|居住|房|电信|充值/.test(s)) return '居住';
+  // 购物：电商/百货/数码/服饰/超市/配件硬件
+  if(/购物|淘宝|天猫|京东|拼多多|超市|商场|专卖|服饰|衣|鞋|裤|帽|百货|大润发|鼠标|键盘|耳机|键帽|手机|数码|充电|支架|改装|电竞|鼠标垫|钢化|机箱|星闪|水滴|发热/.test(s)) return '购物';
   return '其他';
 }
 
