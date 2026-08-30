@@ -489,7 +489,6 @@ const CATEGORIES = [
   {name:'购物', emoji:'🛒', color:'#9775fa'},
   {name:'娱乐', emoji:'🎮', color:'#ffa94d'},
   {name:'通讯', emoji:'📱', color:'#22b8cf'},
-  {name:'社交', emoji:'🤝', color:'#f06595'},
   {name:'学习', emoji:'📚', color:'#38d9a9'},
   {name:'医疗', emoji:'💊', color:'#63e6be'},
   {name:'居住', emoji:'🏠', color:'#868e96'},
@@ -506,20 +505,29 @@ const STORE_KEY = 'expense-tracker-v1';
 const BUDGET_KEY = 'expense-budget-v1';
 
 let data = load();
-// 旧数据迁移：已删除的"订阅"分类 → 并入"娱乐"（保留记录本身）
+// 旧数据迁移：已删除的分类 → 并入现有分类（记录本身保留）
+const CAT_MIGRATE = {'订阅':'娱乐', '社交':'其他'};
 (function(){
   let changed = false;
-  data.forEach(t => { if(t.category==='订阅'){ t.category='娱乐'; changed=true; } });
+  data.forEach(t => {
+    const to = CAT_MIGRATE[t.category];
+    if(to){ t.category = to; changed = true; }
+  });
   if(changed) save();
 })();
 let budget = loadBudget(); // {total:Number, cats:{Name:Number}}
-// 旧的订阅分类预算并入娱乐，防止残留
+// 旧分类预算并入新分类，防止残留
 (function(){
   let changed = false;
-  if(budget.cats && budget.cats['订阅']!==undefined){
-    budget.cats['娱乐'] = (budget.cats['娱乐']||0) + budget.cats['订阅'];
-    if(budget.cats['订阅']!==undefined) delete budget.cats['订阅'];
-    changed = true;
+  if(budget.cats && typeof budget.cats==='object'){
+    Object.keys(CAT_MIGRATE).forEach(old => {
+      if(budget.cats[old]!==undefined){
+        const to = CAT_MIGRATE[old];
+        budget.cats[to] = (budget.cats[to]||0) + budget.cats[old];
+        delete budget.cats[old];
+        changed = true;
+      }
+    });
   }
   if(changed) saveBudget();
 })();
@@ -1428,8 +1436,8 @@ function mapAlipayCat(c){
     '交通':'交通','餐饮':'餐饮','购物':'购物','娱乐':'娱乐','休闲玩乐':'娱乐',
     '生活日用':'购物','生活服务':'其他','穿搭美容':'购物','生意':'其他',
     '医疗':'医疗','学习':'学习','居住':'居住','其他':'其他','通讯':'通讯',
-    '充值缴费':'通讯','酒店旅游':'娱乐','运动户外':'购物','转账':'社交',
-    '社交':'社交','话费':'通讯','生活缴费':'通讯'
+    '充值缴费':'通讯','酒店旅游':'娱乐','运动户外':'购物','转账':'其他',
+    '社交':'其他','话费':'通讯','生活缴费':'通讯'
   };
   return m[c] || null;
 }
@@ -1460,8 +1468,8 @@ function guessCat(type, s){
   }
   // 通讯：话费/流量/宽带（必须先于“居住”）
   if(/话费|流量|宽带|中国电信|中国移动|中国联通|电信充值|移动充值|联通充值|充话|手机费|通讯/.test(s)) return '通讯';
-  // 社交：转账/AA/请客/红包人情（微信转账给朋友等）
-  if(/转账|AA|请客|红包|人情|喝喜酒|随礼|份子/.test(s)) return '社交';
+  // 其他：转账/AA/请客/红包人情（微信转账给朋友等，并入其他）
+  if(/转账|AA|请客|红包|人情|喝喜酒|随礼|份子/.test(s)) return '其他';
   // 餐饮：奶茶/咖啡/外卖/快餐/茶饮/便利店零食
   if(/餐|饭|美团|饿了么|外卖|奶茶|咖啡|火锅|烧烤|食堂|瑞幸|麦当劳|肯德基|食|茶|冰城|蜜雪|饮料|饮品|面包|甜|小吃|面|粉|汉堡|奈雪|喜茶|古茗|7-ELEVEN|美宜佳|便利店|鲜果|果饮/.test(s)) return '餐饮';
   // 交通：地铁/打车/骑行/加油/停车/出行
