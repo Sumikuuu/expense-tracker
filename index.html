@@ -339,7 +339,7 @@
   <!-- 记账 tab -->
   <section id="panel-ledger" class="panel active">
     <div id="importReminder" style="display:none;" class="import-remind"></div>
-    <button id="importBtn" role="button">📥 导入账单</button>
+    <button id="importBtn" role="button">📥 导入</button>
     <div id="ledgerList"></div>
   </section>
 
@@ -465,14 +465,13 @@
     <h2>💾 备份 / 恢复</h2>
     <div class="bk-item">
       <button class="bk-export" id="bkExport">⬇️ 导出备份</button>
-      <button class="bk-import" id="bkImport">⬆️ 导入恢复</button>
+      <button class="bk-import" id="bkImport">📥 导入（账单/备份）</button>
     </div>
     <div class="bk-tip">
       📤 <b>导出备份</b>：把当前所有账目保存成一个文件，可发给另一台设备或用微信/隔空投送传送。
-      <br>📥 <b>导入恢复</b>：选择之前导出的文件，把账目合并进来（重复记录会自动跳过）。
+      <br>📥 <b>导入</b>：选择账单（微信/支付宝的 csv/xlsx）或备份（json），自动识别并合并。
       <br>🔒 数据仅保存在你的设备上，不上传任何服务器。
     </div>
-    <input type="file" id="bkFile" accept=".json" style="display:none;">
   </div>
 </div>
 
@@ -554,42 +553,30 @@ function exportBackup(){
   closeBackup();
 }
 
-// 导入：读取备份 JSON，按 id 去重合并到当前数据
-function importBackup(){
-  const inp = document.getElementById('bkFile');
-  inp.click();
-}
-function onBackupFile(e){
-  const f = (e.target.files||[])[0];
-  if(!f) return;
-  const rd = new FileReader();
-  rd.onload = () => {
-    try{
-      const obj = JSON.parse(rd.result);
-      const arr = Array.isArray(obj) ? obj : (obj.data||[]);
-      if(!Array.isArray(arr)){ toast('备份文件格式不正确'); return; }
-      let added = 0, skipped = 0;
-      arr.forEach(r => {
-        if(!r || !r.id){ return; }
-        const dup = data.some(t => t.id===r.id || (t.date===r.date && t.amount===r.amount && t.category===r.category));
-        if(dup){ skipped++; }
-        else { data.push(r); added++; }
-      });
-      // 同步预算
-      if(obj && obj.budget && typeof obj.budget==='object'){
-        budget = {total: parseFloat(obj.budget.total)||0, cats: (obj.budget.cats||{})};
-        saveBudget();
-      }
-      save();
-      renderAll();
-      toast(`导入完成：新增 ${added} 条，跳过 ${skipped} 条重复`);
-      closeBackup();
-    }catch(err){
-      toast('导入失败：文件解析出错');
+// 恢复：读取备份 JSON，按 id 去重合并到当前数据（供统一导入入口调用）
+function restoreBackupText(text){
+  try{
+    const obj = JSON.parse(text);
+    const arr = Array.isArray(obj) ? obj : (obj.data||[]);
+    if(!Array.isArray(arr)){ toast('备份文件格式不正确'); return; }
+    let added = 0, skipped = 0;
+    arr.forEach(r => {
+      if(!r || !r.id){ return; }
+      const dup = data.some(t => t.id===r.id || (t.date===r.date && t.amount===r.amount && t.category===r.category));
+      if(dup){ skipped++; }
+      else { data.push(r); added++; }
+    });
+    // 同步预算
+    if(obj && obj.budget && typeof obj.budget==='object'){
+      budget = {total: parseFloat(obj.budget.total)||0, cats: (obj.budget.cats||{})};
+      saveBudget();
     }
-  };
-  rd.readAsText(f, 'utf-8');
-  e.target.value = '';  // 允许重复选择同一文件
+    save();
+    renderAll();
+    toast(`导入完成：新增 ${added} 条，跳过 ${skipped} 条重复`);
+  }catch(err){
+    toast('导入失败：文件解析出错');
+  }
 }
 
 function catBudget(name){ return parseFloat(budget.cats && budget.cats[name])||0; }
@@ -1042,8 +1029,8 @@ function pickFile(){
   const input = document.createElement('input');
   input.type = 'file';
   // 兼容扩展名 + iOS 常见 MIME（含 octet-stream，避免文件被灰掉选不了）
-  input.accept = '.csv,.txt,.xlsx,.xls,.CSV,.XLSX,' +
-    'text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,' +
+  input.accept = '.csv,.txt,.json,.xlsx,.xls,.CSV,.JSON,.XLSX,' +
+    'text/csv,text/plain,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,' +
     'application/vnd.ms-excel,application/octet-stream,text/*';
   input.style.display = 'none';
   document.body.appendChild(input);   // 挂到 DOM，iOS 更稳
@@ -1055,6 +1042,19 @@ function pickFile(){
     if(done) return; done = true;
     const f = input.files[0];
     if(!f){ cleanup(); return; }
+    const fname = (f.name||'').toLowerCase();
+    // 统一入口自动分流：.json 备份恢复；否则按账单解析
+    if(/\.json$/.test(fname)){
+      const rd = new FileReader();
+      rd.onload = () => {
+        cleanup();
+        restoreBackupText(rd.result);
+        closeBackup();
+      };
+      rd.onerror = () => { cleanup(); toast('备份文件读取失败，请重试'); };
+      rd.readAsText(f, 'utf-8');
+      return;
+    }
     const isXlsx = /\.xlsx$|\.xls$|application\/vnd\.openxmlformats|ms-excel|officeDocument/i.test(f.name + (f.type||''));
     showProgress('正在读取账单…');
     setTimeout(() => {
@@ -1520,8 +1520,7 @@ function bind(){
   // 备份 / 恢复
   document.getElementById('backupBtn').onclick = openBackup;
   document.getElementById('bkExport').onclick = exportBackup;
-  document.getElementById('bkImport').onclick = importBackup;
-  document.getElementById('bkFile').addEventListener('change', onBackupFile);
+  document.getElementById('bkImport').onclick = pickFile;
   document.getElementById('backupOverlay').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeBackup(); });
 }
 
