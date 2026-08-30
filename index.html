@@ -292,7 +292,25 @@
   .progress-box .p-spin{display:inline-block;width:16px;height:16px;border:2px solid #cbd2df;
     border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite;
     vertical-align:-3px;margin-right:6px;}
-  @keyframes spin{to{transform:rotate(360deg);}}</style>
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  /* ===== 再导一份提示 ===== */
+  #continueImport{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 96px);
+    transform:translateX(-50%) translateY(20px);z-index:65;opacity:0;pointer-events:none;
+    background:#fff;border-radius:14px;box-shadow:0 8px 30px rgba(20,28,45,.18);
+    padding:10px 14px 10px 16px;display:flex;align-items:center;gap:10px;font-size:13px;
+    color:var(--ink);transition:all .25s ease;white-space:nowrap;border:1px solid #e6eaf2;}
+  #continueImport.show{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0);}
+  #continueImport button{background:linear-gradient(135deg,var(--primary),var(--primary-dark));
+    color:#fff;border:none;border-radius:9px;padding:7px 14px;font-size:13px;font-weight:600;
+    cursor:pointer;}
+  /* ===== 导入提醒 ===== */
+  .import-remind{display:flex;align-items:center;gap:10px;background:#fff8e6;border:1px solid #f5d986;
+    border-radius:12px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#8a6d1a;}
+  .import-remind button{margin-left:auto;background:#f5a623;color:#fff;border:none;border-radius:9px;
+    padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;}
+  .import-remind .x{cursor:pointer;color:#b5923f;font-size:15px;padding:0 2px;flex-shrink:0;}
+</style>
 </head>
 <body>
 
@@ -320,6 +338,7 @@
 <main>
   <!-- 记账 tab -->
   <section id="panel-ledger" class="panel active">
+    <div id="importReminder" style="display:none;" class="import-remind"></div>
     <button id="importBtn" role="button">📥 导入账单</button>
     <div id="ledgerList"></div>
   </section>
@@ -1016,6 +1035,10 @@ function updateProgress(pct, text){
 function hideProgress(){ document.getElementById('progressOverlay').classList.remove('show'); }
 
 function importBill(){
+  pickFile();
+}
+// 打开文件选择并处理（可重复调用，支持"再导一份"）
+function pickFile(){
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.csv,.txt,.xlsx,.xls';
@@ -1081,11 +1104,52 @@ function mergeAndFinish(text){
       } else {
         save(); renderAll(); hideProgress();
         toast(`导入成功 ${added} 条${before?`，已跳过重复 ${skipped} 条`:''}`);
+        showContinueImport();   // 提示"再导一份"（如微信/支付宝第二份账单）
       }
     }
     updateProgress(0, `解析完成，共 ${total} 条，开始写入…`);
     setTimeout(step, 0);
   }, 30);
+}
+
+// "再导一份" 浮动提示：显示 3.5 秒，点击继续选文件
+function showContinueImport(){
+  // 若已存在则不重复创建
+  let el = document.getElementById('continueImport');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'continueImport';
+    el.innerHTML = `💡 <b>还要导别的账单吗？</b><button id="contBtn">再导一份</button>`;
+    document.body.appendChild(el);
+    el.querySelector('#contBtn').onclick = () => { el.classList.remove('show'); pickFile(); };
+  }
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(()=>el.classList.remove('show'), 3500);
+}
+
+// 每月导入提醒：有历史记录但上月缺失时，提示"该导账单了"
+let remindDismissed = false;   // 本会话内关闭后不再弹
+function checkImportReminder(){
+  const el = document.getElementById('importReminder');
+  if(!el) return;
+  const now = new Date();
+  const curYM = currentMonth();
+  // 上月 YM
+  const lm = new Date(now.getFullYear(), now.getMonth()-1, 1);
+  const lastYM = lm.getFullYear() + '-' + String(lm.getMonth()+1).padStart(2,'0');
+  const hasHistory = data.length > 0;
+  const lastEmpty = monthTransactions(lastYM).length === 0;
+  if(!hasHistory || !lastEmpty || remindDismissed){ el.style.display='none'; return; }
+  // 上月无记录（无论本月状态）→ 提醒补导入
+  const label = lm.getFullYear()+'年'+(lm.getMonth()+1)+'月';
+  el.innerHTML = `
+    <span>⚠️ <b>${label}还没有账单</b>，要不要导入一下？</span>
+    <button id="remindGo">去导入</button>
+    <span class="x" id="remindX">✕</span>`;
+  el.style.display = 'flex';
+  el.querySelector('#remindGo').onclick = ()=>{ el.style.display='none'; importBill(); };
+  el.querySelector('#remindX').onclick = ()=>{ remindDismissed = true; el.style.display='none'; };
 }
 
 // 简单 xlsx→CSV 文本转换（共享字符串 + 序列号日期 → 日期字符串），依赖 pako
@@ -1364,6 +1428,7 @@ function isDup(r){
 /* ============ 渲染总调度 ============ */
 function renderAll(){
   renderHeader(); renderLedger(); renderStats();
+  checkImportReminder();
 }
 
 /* ============ 事件绑定 ============ */
