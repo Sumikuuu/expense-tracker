@@ -269,14 +269,6 @@
     width:34px;height:34px;border-radius:10px;font-size:16px;line-height:1;margin-left:8px;
     display:inline-flex;align-items:center;justify-content:center;}
   #backupBtn:active{background:rgba(255,255,255,.3);}
-  .bk-item{display:flex;gap:10px;margin-top:10px;}
-  .bk-item button{flex:1;border:none;border-radius:12px;padding:13px;font-size:14px;
-    font-weight:600;cursor:pointer;}
-  .bk-item .bk-export{background:linear-gradient(135deg,var(--primary),var(--primary-dark));color:#fff;
-    box-shadow:0 2px 10px rgba(91,141,239,.3);}
-  .bk-item .bk-import{background:#fff;color:var(--primary);border:1.5px solid var(--primary);}
-  .bk-tip{font-size:12px;line-height:1.7;color:var(--ink-2);margin-top:12px;
-    background:#f4f7fc;border-radius:10px;padding:10px 12px;}
 
   /* ===== 导入进度遮罩 ===== */
   #progressOverlay{position:fixed;inset:0;z-index:70;background:rgba(20,28,45,.55);
@@ -322,7 +314,7 @@
       <button id="nextMonth" aria-label="下个月">›</button>
     </div>
     <button id="todayBtn">回到本月</button>
-    <button id="backupBtn" title="备份 / 恢复">💾</button>
+    <button id="backupBtn" title="导出备份" onclick="exportBackup()">💾</button>
   </div>
   <div class="summary">
     <div class="s-label">本月支出</div>
@@ -458,23 +450,6 @@
   </div>
 </div>
 
-<!-- 备份 / 恢复 -->
-<div class="overlay" id="backupOverlay">
-  <div class="sheet">
-    <div class="grab"></div>
-    <h2>💾 备份 / 恢复</h2>
-    <div class="bk-item">
-      <button class="bk-export" id="bkExport">⬇️ 导出备份</button>
-      <button class="bk-import" id="bkImport">📥 导入（账单/备份）</button>
-    </div>
-    <div class="bk-tip">
-      📤 <b>导出备份</b>：把当前所有账目保存成一个文件，可发给另一台设备或用微信/隔空投送传送。
-      <br>📥 <b>导入</b>：选择账单（微信/支付宝的 csv/xlsx）或备份（json），自动识别并合并。
-      <br>🔒 数据仅保存在你的设备上，不上传任何服务器。
-    </div>
-  </div>
-</div>
-
 <script>
 /* ============ 数据模型 ============ */
 const CATEGORIES = [
@@ -528,9 +503,6 @@ function saveBudget(){ localStorage.setItem(BUDGET_KEY, JSON.stringify(budget));
 function totalBudget(){ return parseFloat(budget.total)||0; }
 
 /* ============ 备份 / 恢复 ============ */
-function openBackup(){ document.getElementById('backupOverlay').classList.add('show'); }
-function closeBackup(){ document.getElementById('backupOverlay').classList.remove('show'); }
-
 // 导出：打包 data + budget 为 JSON 文件下载
 function exportBackup(){
   const payload = {
@@ -550,7 +522,6 @@ function exportBackup(){
   document.body.removeChild(a);
   setTimeout(()=>URL.revokeObjectURL(url), 1000);
   toast('已导出备份文件 ✓');
-  closeBackup();
 }
 
 // 恢复：读取备份 JSON，按 id 去重合并到当前数据（供统一导入入口调用）
@@ -1049,7 +1020,6 @@ function pickFile(){
       rd.onload = () => {
         cleanup();
         restoreBackupText(rd.result);
-        closeBackup();
       };
       rd.onerror = () => { cleanup(); toast('备份文件读取失败，请重试'); };
       rd.readAsText(f, 'utf-8');
@@ -1517,11 +1487,8 @@ function bind(){
   document.getElementById('delBtn').onclick = delEntry;
   overlay.addEventListener('click', e=>{ if(e.target===overlay) closeSheet(); });
 
-  // 备份 / 恢复
-  document.getElementById('backupBtn').onclick = openBackup;
-  document.getElementById('bkExport').onclick = exportBackup;
-  document.getElementById('bkImport').onclick = pickFile;
-  document.getElementById('backupOverlay').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeBackup(); });
+  // 备份：右上角 💾 一键导出
+  document.getElementById('backupBtn').onclick = exportBackup;
 }
 
 bind();
