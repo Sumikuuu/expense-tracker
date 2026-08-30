@@ -261,6 +261,19 @@
   }
   .confirm-note{text-align:center;color:var(--ink-2);font-size:14px;margin:0 0 6px;}
   #confirmOverlay{z-index:55;}
+  /* ===== 导入预览确认 ===== */
+  .pv-summary{font-size:13px;color:var(--ink);margin:2px 0 10px;line-height:1.7;}
+  .pv-summary .pv-cats{color:var(--ink-2);font-size:12px;}
+  .pv-list{max-height:46vh;overflow-y:auto;border-top:1px solid #eef1f6;margin-bottom:6px;}
+  .pv-item{display:flex;align-items:center;gap:8px;padding:9px 2px;border-bottom:1px solid #f2f4f8;font-size:13px;}
+  .pv-item:last-child{border-bottom:none;}
+  .pv-date{color:var(--ink-3);font-size:12px;white-space:nowrap;}
+  .pv-cat{color:var(--ink);white-space:nowrap;max-width:88px;overflow:hidden;text-overflow:ellipsis;}
+  .pv-note{flex:1;min-width:0;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pv-amt{font-weight:700;white-space:nowrap;}
+  .pv-amt.expense{color:var(--expense);}
+  .pv-amt.income{color:var(--income);}
+  .pv-more{text-align:center;color:var(--ink-3);font-size:12px;padding:8px 0;}
 
   .toast{
     position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 130px);left:50%;transform:translateX(-50%);z-index:60;
@@ -447,6 +460,19 @@
   </div>
 </div>
 
+<!-- 导入预览确认 -->
+<div class="overlay" id="previewOverlay">
+  <div class="sheet">
+    <div class="grab"></div>
+    <h2>确认导入</h2>
+    <div class="pv-summary" id="pvSummary"></div>
+    <div class="pv-list" id="pvList"></div>
+    <button class="save-btn" id="pvConfirm">确认导入</button>
+    <button class="delete-btn" id="pvCancel" style="color:var(--primary);background:#fff;border:1.5px solid var(--primary);">取消</button>
+    <div class="bk-tip" style="margin-top:12px;">重复的账单会自动跳过，无需担心。</div>
+  </div>
+</div>
+
 <!-- 月份选择器 -->
 <div class="overlay" id="monthOverlay">
   <div class="sheet">
@@ -540,11 +566,24 @@ let budget = loadBudget(); // {total:Number, cats:{Name:Number}}
   }
   if(changed) saveBudget();
 })();
+// 一次性迁移：旧的「金额以元存储」改为「整数分」，避免浮点误差
+const CENTS_FLAG = 'expense-cents-v1';
+(function(){
+  if(localStorage.getItem(CENTS_FLAG)) return;
+  data.forEach(t => { t.amount = toCents(t.amount); });
+  budget.total = toCents(budget.total);
+  if(budget.cats && typeof budget.cats==='object'){
+    Object.keys(budget.cats).forEach(k => { budget.cats[k] = toCents(budget.cats[k]); });
+  }
+  localStorage.setItem(CENTS_FLAG,'1');
+  save(); saveBudget();
+})();
 let viewMonth = currentMonth(); // YYYY-MM
 let viewCat = '';               // 分类筛选：''=全部
 let currentTab = 'ledger';
 let editingId = null;
 let pickerYear = new Date().getFullYear(); // 月份选择器当前展示的年份
+let statsDirty = true;                     // 统计页是否待重绘（记账页时延后）
 
 function load(){
   try{
@@ -573,7 +612,8 @@ function closeBackup(){ document.getElementById('backupOverlay').classList.remov
 function exportBackup(){
   const payload = {
     app: '月度记账',
-    version: 1,
+    version: 2,
+    unit: 'cents',
     exportedAt: new Date().toISOString(),
     budget: budget,
     data: data
@@ -597,16 +637,21 @@ function restoreBackupText(text){
     const obj = JSON.parse(text);
     const arr = Array.isArray(obj) ? obj : (obj.data||[]);
     if(!Array.isArray(arr)){ toast('备份文件格式不正确'); return; }
+    // 老版本导出金额以「元」存储，转成「分」保持一致（v2 / unit=cents 的备份已是分）
+    const isCents = !!(obj && (obj.unit==='cents' || ((obj.version||0)>=2)));
     let added = 0, skipped = 0;
     arr.forEach(r => {
       if(!r || !r.id){ return; }
-      const dup = data.some(t => t.id===r.id) || isDup(r);
+      const rec = isCents ? r : Object.assign({}, r, {amount: toCents(r.amount)});
+      const dup = data.some(t => t.id===rec.id) || isDup(rec);
       if(dup){ skipped++; }
-      else { data.push(r); added++; }
+      else { data.push(rec); added++; }
     });
     // 同步预算
     if(obj && obj.budget && typeof obj.budget==='object'){
-      budget = {total: parseFloat(obj.budget.total)||0, cats: (obj.budget.cats||{})};
+      budget = { total: isCents ? (parseInt(obj.budget.total)||0) : toCents(obj.budget.total),
+                 cats: (obj.budget.cats||{}) };
+      if(!isCents){ Object.keys(budget.cats).forEach(k => { budget.cats[k] = toCents(budget.cats[k]); }); }
       saveBudget();
     }
     save();
@@ -635,13 +680,18 @@ function esc(s){
 function catName(name){ for(const c of CATEGORIES){ if(c.name===name) return c; } return CATEGORIES[CATEGORIES.length-1]; }
 function channelName(n){ for(const c of CHANNELS){ if(c.name===n) return c; } return CHANNELS[4]; }
 function channelColor(n){ return channelName(n).color; }
-function fmt(n){
-  const num = parseFloat(n) || 0;
-  return num.toLocaleString('zh-CN', {minimumFractionDigits:2, maximumFractionDigits:2});
+function toCents(x){
+  const n = parseFloat(x);
+  if(!isFinite(n)) return 0;
+  return Math.round(n*100);
 }
-function fmtSci(n){
-  const num = parseFloat(n) || 0;
-  return num.toLocaleString('zh-CN', {maximumFractionDigits:2});
+function fmt(n){ // 输入为「分」，显示为元（两位小数）
+  const c = Math.round(parseFloat(n)||0);
+  return (c/100).toLocaleString('zh-CN', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function fmtSci(n){ // 输入为「分」，显示为元（最多两位）
+  const c = Math.round(parseFloat(n)||0);
+  return (c/100).toLocaleString('zh-CN', {maximumFractionDigits:2});
 }
 function monthTransactions(m){
   return data.filter(t => (t.date||'').slice(0,7) === m);
@@ -805,7 +855,7 @@ function renderBudgetEditor(list, exp){
   const totalIn = document.getElementById('budgetTotal');
   // 只在容器隐藏/未聚焦时刷新数值，避免打字被覆盖
   if(document.activeElement !== totalIn){
-    totalIn.value = totalBudget()>0 ? totalBudget() : '';
+    totalIn.value = totalBudget()>0 ? (totalBudget()/100) : '';
   }
   // 分类预算行
   const wrap = document.getElementById('budgetCats');
@@ -818,7 +868,7 @@ function renderBudgetEditor(list, exp){
       <span class="bc-emoji">${c.emoji}</span>
       <span class="bc-name">${c.name}</span>
       <input class="bc-in" data-cat="${c.name}" type="number" inputmode="decimal" min="0" step="1"
-        placeholder="不限" value="${b>0?b:''}" ${over?'style="color:var(--expense);font-weight:700;border-bottom-color:var(--expense);"':''}>
+        placeholder="不限" value="${b>0?(b/100):''}" ${over?'style="color:var(--expense);font-weight:700;border-bottom-color:var(--expense);"':''}>
       <span class="bc-used" style="color:${over?'var(--expense)':'var(--ink-3)'}">${fmtSci(used)}</span>
     </div>`;
   }).join('');
@@ -828,10 +878,11 @@ function renderBudgetEditor(list, exp){
     if(!inp) return;
     const name = inp.dataset.cat;
     const v = parseFloat(inp.value);
-    if(v>0) budget.cats[name]=v; else delete budget.cats[name];
+    const cents = toCents(v);
+    if(cents>0) budget.cats[name]=cents; else delete budget.cats[name];
     saveBudget();
     const used = list.filter(t=>t.type==='expense' && t.category===name).reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
-    if(v>0 && used>v){ inp.style.color='var(--expense)'; inp.style.fontWeight='700'; inp.style.borderBottomColor='var(--expense)'; }
+    if(cents>0 && used>cents){ inp.style.color='var(--expense)'; inp.style.fontWeight='700'; inp.style.borderBottomColor='var(--expense)'; }
     else { inp.style.color='var(--ink)'; inp.style.fontWeight='400'; inp.style.borderBottomColor='#d5dbe6'; }
     renderHeader();
   };
@@ -959,7 +1010,7 @@ function openSheet(id){
   setType(id ? (data.find(t=>t.id===id).type) : 'expense');
   setCat(id ? data.find(t=>t.id===id).category : '餐饮');
   formChannel = id ? (data.find(t=>t.id===id).channel || '其他') : '其他';
-  document.getElementById('amount').value = id ? data.find(t=>t.id===id).amount : '';
+  document.getElementById('amount').value = id ? (data.find(t=>t.id===id).amount/100) : '';
   document.getElementById('note').value = id ? (data.find(t=>t.id===id).note||'') : '';
   document.getElementById('date').value = id ? data.find(t=>t.id===id).date : todayStr();
   document.getElementById('sheetTitle').textContent = id ? '编辑' : (formType==='expense'?'记一笔支出':'记一笔收入');
@@ -1023,8 +1074,8 @@ function toast(msg){
 }
 
 function saveEntry(){
-  const amount = parseFloat(document.getElementById('amount').value);
-  if(!amount || amount<=0){ toast('请输入有效金额'); return; }
+  const amount = toCents(document.getElementById('amount').value);
+  if(amount<=0){ toast('请输入有效金额'); return; }
   const cat = (document.querySelector('#catGrid .c.sel')||{}).dataset && document.querySelector('#catGrid .c.sel').dataset.name;
   const note = document.getElementById('note').value.trim();
   const date = document.getElementById('date').value || todayStr();
@@ -1185,38 +1236,81 @@ function pickFile(){
 }
 
 // 解析 → 写入（分帧更新进度，避免阻塞 UI）
+let pendingRecs = [];   // 待确认导入的记录（预览确认后再写入）
+
 function mergeAndFinish(text){
   updateProgress(0, '正在解析交易记录…');
-  let recs = null;
   setTimeout(() => {
+    let recs = [];
     try{ recs = parseBill(text); }
     catch(e){ recs = []; }
     if(!recs || recs.length===0){ hideProgress(); toast('未识别到有效的交易记录'); return; }
-    const before = data.length;
-    let added = 0, skipped = 0, i = 0;
-    const total = recs.length;
-    // 分帧批量写入，每帧处理一部分并刷新进度条
-    const BATCH = 250;
-    function step(){
-      const end = Math.min(i + BATCH, total);
-      for(; i<end; i++){
-        const r = recs[i];
-        if(!r) continue;
-        if(isDup(r)){ skipped++; }
-        else { data.push(r); added++; }
-      }
-      updateProgress(Math.round(i/total*100), `正在写入 ${i}/${total} 条…`);
-      if(i < total){
-        setTimeout(step, 0);   // 让出主线程，进度条可见、界面不卡
-      } else {
-        save(); renderAll(); hideProgress();
-        toast(`导入成功 ${added} 条${before?`，已跳过重复 ${skipped} 条`:''}`);
-        showContinueImport();   // 提示"再导一份"（如微信/支付宝第二份账单）
-      }
-    }
-    updateProgress(0, `解析完成，共 ${total} 条，开始写入…`);
-    setTimeout(step, 0);
+    pendingRecs = recs;
+    showImportPreview(recs);
   }, 30);
+}
+
+// 预览：展示识别出的记录与汇总，让用户确认后再写入
+function showImportPreview(recs){
+  hideProgress();
+  const exp = recs.filter(r=>r.type==='expense').reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
+  const inc = recs.filter(r=>r.type==='income').reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
+  const byCat = {};
+  recs.forEach(r=>{ if(r.type==='expense') byCat[r.category]=(byCat[r.category]||0)+1; });
+  const catStr = Object.keys(byCat).sort((a,b)=>byCat[b]-byCat[a])
+    .map(c=>`${catName(c).emoji} ${esc(c)} ×${byCat[c]}`).join('　');
+  document.getElementById('pvSummary').innerHTML =
+    `共识别 <b>${recs.length}</b> 条　支出 ¥${fmt(exp)}　收入 ¥${fmt(inc)}` +
+    (catStr?`<br><span class="pv-cats">${catStr}</span>`:'');
+  const MAX = 300;
+  const list = recs.slice(0, MAX).map(r=>{
+    const c = catName(r.category);
+    return `<div class="pv-item">
+      <span class="pv-date">${esc(r.date)}</span>
+      <span class="pv-cat">${esc(c.emoji)} ${esc(c.name)}</span>
+      <span class="pv-note">${esc(r.note||'')}</span>
+      <span class="pv-amt ${r.type==='income'?'income':'expense'}">${r.type==='income'?'+':'−'}${fmt(r.amount)}</span>
+    </div>`;
+  }).join('');
+  document.getElementById('pvList').innerHTML = list +
+    (recs.length>MAX?`<div class="pv-more">… 仅显示前 ${MAX} 条，共 ${recs.length} 条</div>`:'');
+  document.getElementById('pvConfirm').textContent = `确认导入 ${recs.length} 条`;
+  document.getElementById('previewOverlay').classList.add('show');
+}
+function closePreview(){ document.getElementById('previewOverlay').classList.remove('show'); }
+function confirmImport(){
+  const recs = pendingRecs;
+  if(!recs || !recs.length){ closePreview(); return; }
+  pendingRecs = [];
+  closePreview();
+  writeRecs(recs);
+}
+// 分帧批量写入（预览确认后调用）
+function writeRecs(recs){
+  const before = data.length;
+  let added = 0, skipped = 0, i = 0;
+  const total = recs.length;
+  showProgress('正在导入…');
+  const BATCH = 250;
+  function step(){
+    const end = Math.min(i + BATCH, total);
+    for(; i<end; i++){
+      const r = recs[i];
+      if(!r) continue;
+      if(isDup(r)){ skipped++; }
+      else { data.push(r); added++; }
+    }
+    updateProgress(Math.round(i/total*100), `正在写入 ${i}/${total} 条…`);
+    if(i < total){
+      setTimeout(step, 0);   // 让出主线程，进度条可见、界面不卡
+    } else {
+      save(); renderAll(); hideProgress();
+      toast(`导入成功 ${added} 条${before?`，已跳过重复 ${skipped} 条`:''}`);
+      showContinueImport();   // 提示"再导一份"（如微信/支付宝第二份账单）
+    }
+  }
+  updateProgress(0, `开始写入，共 ${total} 条…`);
+  setTimeout(step, 0);
 }
 
 // "再导一份" 浮动提示：显示 3.5 秒，点击继续选文件
@@ -1236,7 +1330,12 @@ function showContinueImport(){
 }
 
 // 每月导入提醒：有历史记录但上月缺失时，提示"该导账单了"
-let remindDismissed = false;   // 本会话内关闭后不再弹
+let remindDismissed = loadRemindDismissed();   // {YM:true} 已忽略的月份，持久化跨会话
+function loadRemindDismissed(){
+  try{ const o = JSON.parse(localStorage.getItem('expense-remind-dismissed')||'{}'); return (o && typeof o==='object') ? o : {}; }
+  catch(e){ return {}; }
+}
+function saveRemindDismissed(){ localStorage.setItem('expense-remind-dismissed', JSON.stringify(remindDismissed)); }
 function checkImportReminder(){
   const el = document.getElementById('importReminder');
   if(!el) return;
@@ -1247,7 +1346,7 @@ function checkImportReminder(){
   const lastYM = lm.getFullYear() + '-' + String(lm.getMonth()+1).padStart(2,'0');
   const hasHistory = data.length > 0;
   const lastEmpty = monthTransactions(lastYM).length === 0;
-  if(!hasHistory || !lastEmpty || remindDismissed){ el.style.display='none'; return; }
+  if(!hasHistory || !lastEmpty || remindDismissed[lastYM]){ el.style.display='none'; return; }
   // 上月无记录（无论本月状态）→ 提醒补导入
   const label = lm.getFullYear()+'年'+(lm.getMonth()+1)+'月';
   el.innerHTML = `
@@ -1255,8 +1354,8 @@ function checkImportReminder(){
     <button id="remindGo">去导入</button>
     <span class="x" id="remindX">✕</span>`;
   el.style.display = 'flex';
-  el.querySelector('#remindGo').onclick = ()=>{ el.style.display='none'; importBill(); };
-  el.querySelector('#remindX').onclick = ()=>{ remindDismissed = true; el.style.display='none'; };
+  el.querySelector('#remindGo').onclick = ()=>{ remindDismissed[lastYM]=true; saveRemindDismissed(); el.style.display='none'; importBill(); };
+  el.querySelector('#remindX').onclick = ()=>{ remindDismissed[lastYM]=true; saveRemindDismissed(); el.style.display='none'; };
 }
 
 // 简单 xlsx→CSV 文本转换（共享字符串 + 序列号日期 → 日期字符串），依赖 pako
@@ -1428,12 +1527,17 @@ function parseBill(text){
   const recs = [];
   for(let i=hi+1; i<rows.length; i++){
     const r = rows[i];
-    const time = (r[idx.time]||'').trim();
+    let time = (r[idx.time]||'').trim();
     const rawAmt = (r[idx.amt]||'').trim();
+    // 时间列可能是 Excel 日期序列号（如 45000），转成日期字符串
+    if(/^\d{4}-\d{1,2}-\d{1,2}/.test(time)){ /* 已是日期 */ }
+    else if(/^\d+(\.\d+)?$/.test(time) && parseFloat(time)>20000 && parseFloat(time)<90000){
+      time = excelDateToStr(Math.floor(parseFloat(time)));
+    }
     if(!/^\d{4}-\d{1,2}-\d{1,2}/.test(time) || !rawAmt) continue;
     // 金额可能为负或带 ¥/￥/空格，取绝对值
-    const amt = Math.abs(parseFloat(rawAmt.replace(/,/g,'').replace(/[¥￥]/g,'').trim()));
-    if(!isFinite(amt) || amt<=0) continue;
+    const amt = toCents(Math.abs(parseFloat(rawAmt.replace(/,/g,'').replace(/[¥￥]/g,'').trim())));
+    if(amt<=0) continue;
     const flowRaw = (r[idx.flow]||'').trim();
     // 中性交易（提现/充值/理财/还款等）：收/支为“/”或空，跳过，不计入收支
     if(!flowRaw || flowRaw==='/' || flowRaw==='—' || flowRaw==='-') continue;
@@ -1532,7 +1636,9 @@ function isDup(r){
 
 /* ============ 渲染总调度 ============ */
 function renderAll(){
-  renderHeader(); renderCatFilter(); renderLedger(); renderStats();
+  renderHeader(); renderCatFilter(); renderLedger();
+  if(currentTab==='stats'){ renderStats(); statsDirty=false; }
+  else { statsDirty=true; }
   checkImportReminder();
 }
 
@@ -1552,7 +1658,7 @@ function bind(){
 
   // 总预算输入（一次性绑定）
   document.getElementById('budgetTotal').addEventListener('input', ()=>{
-    const v = parseFloat(document.getElementById('budgetTotal').value);
+    const v = toCents(document.getElementById('budgetTotal').value);
     budget.total = v>0 ? v : 0;
     saveBudget();
     renderHeader();
@@ -1580,6 +1686,7 @@ function bind(){
       document.querySelectorAll('nav.tabs .tab').forEach(t=>t.classList.toggle('active', t===tab));
       document.getElementById('panel-ledger').classList.toggle('active', currentTab==='ledger');
       document.getElementById('panel-stats').classList.toggle('active', currentTab==='stats');
+      if(currentTab==='stats' && statsDirty){ renderStats(); statsDirty=false; }
     };
   });
 
@@ -1602,6 +1709,9 @@ function bind(){
   document.getElementById('confirmCancelBtn').onclick = closeConfirm;
   document.getElementById('confirmOverlay').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeConfirm(); });
   overlay.addEventListener('click', e=>{ if(e.target===overlay) closeSheet(); });
+  document.getElementById('pvConfirm').onclick = confirmImport;
+  document.getElementById('pvCancel').onclick = closePreview;
+  document.getElementById('previewOverlay').addEventListener('click', e=>{ if(e.target===e.currentTarget) closePreview(); });
 
   // 备份 / 导入弹窗
   document.getElementById('backupBtn').onclick = openBackup;
