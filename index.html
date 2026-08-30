@@ -678,15 +678,17 @@ function renderHeader(){
 function renderCatFilter(){
   const el = document.getElementById('catFilter');
   if(!el) return;
-  const cats = [{name:'', emoji:'📋', color:null}]
+  // label=显示文本；name=筛选键（'' 表示全部，不能改成"全部"否则筛选逻辑失效）
+  const cats = [{name:'', label:'📋 全部', color:null}]
     .concat(CATEGORIES)
     .concat(INCOME_CATS.filter(c=>!CATEGORIES.some(e=>e.name===c.name))); // 收入类去重后追加
   el.innerHTML = cats.map(c => {
     const sel = c.name===viewCat;
     const col = c.color || 'var(--primary)';
     const bg = c.color ? hexA(c.color,.14) : '#eef4ff';
+    const label = c.label || (c.emoji+ (c.name?' '+c.name:''));
     return `<div class="cf${sel?' sel':''}" data-cat="${c.name}"
-      style="${sel?`--c:${col};--cgbg:${bg};`:''}">${c.emoji||c.name} ${c.emoji?c.name:''}</div>`;
+      style="${sel?`--c:${col};--cgbg:${bg};`:''}">${label}</div>`;
   }).join('');
   el.querySelectorAll('.cf').forEach(chip => {
     chip.onclick = () => {
