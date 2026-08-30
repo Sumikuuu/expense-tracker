@@ -259,6 +259,8 @@
     width:100%;margin-top:10px;border:none;background:#fff;color:var(--expense);
     border-radius:14px;padding:12px;font-size:14px;cursor:pointer;
   }
+  .confirm-note{text-align:center;color:var(--ink-2);font-size:14px;margin:0 0 6px;}
+  #confirmOverlay{z-index:55;}
 
   .toast{
     position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 130px);left:50%;transform:translateX(-50%);z-index:60;
@@ -434,6 +436,17 @@
   </div>
 </div>
 
+<!-- 删除确认 -->
+<div class="overlay" id="confirmOverlay">
+  <div class="sheet">
+    <div class="grab"></div>
+    <h2>删除这条记录？</h2>
+    <p class="confirm-note">删除后无法恢复，确定要删除吗？</p>
+    <button class="save-btn" id="confirmDelBtn">确定删除</button>
+    <button class="delete-btn" id="confirmCancelBtn" style="color:var(--primary);background:#fff;border:1.5px solid var(--primary);">取消</button>
+  </div>
+</div>
+
 <!-- 月份选择器 -->
 <div class="overlay" id="monthOverlay">
   <div class="sheet">
@@ -587,7 +600,7 @@ function restoreBackupText(text){
     let added = 0, skipped = 0;
     arr.forEach(r => {
       if(!r || !r.id){ return; }
-      const dup = data.some(t => t.id===r.id || (t.date===r.date && t.amount===r.amount && t.category===r.category));
+      const dup = data.some(t => t.id===r.id) || isDup(r);
       if(dup){ skipped++; }
       else { data.push(r); added++; }
     });
@@ -614,7 +627,12 @@ function todayStr(){
   const d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
-function catName(name){ for(const c of CATEGORIES){ if(c.name===name) return c; } return CATEGORIES[7]; }
+function esc(s){
+  return String(s==null?'':s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function catName(name){ for(const c of CATEGORIES){ if(c.name===name) return c; } return CATEGORIES[CATEGORIES.length-1]; }
 function channelName(n){ for(const c of CHANNELS){ if(c.name===n) return c; } return CHANNELS[4]; }
 function channelColor(n){ return channelName(n).color; }
 function fmt(n){
@@ -683,8 +701,8 @@ function renderCatFilter(){
     const col = c.color || 'var(--primary)';
     const bg = c.color ? hexA(c.color,.14) : '#eef4ff';
     const label = c.label || (c.emoji+ (c.name?' '+c.name:''));
-    return `<div class="cf${sel?' sel':''}" data-cat="${c.name}"
-      style="${sel?`--c:${col};--cgbg:${bg};`:''}">${label}</div>`;
+    return `<div class="cf${sel?' sel':''}" data-cat="${esc(c.name)}"
+      style="${sel?`--c:${col};--cgbg:${bg};`:''}">${esc(label)}</div>`;
   }).join('');
   el.querySelectorAll('.cf').forEach(chip => {
     chip.onclick = () => {
@@ -702,7 +720,7 @@ function renderLedger(){
   const wrap = document.getElementById('ledgerList');
   if(list.length===0){
     wrap.innerHTML = viewCat
-      ? `<div class="empty"><div class="big">🍃</div>本月「${viewCat}」还没有记录</div>`
+      ? `<div class="empty"><div class="big">🍃</div>本月「${esc(viewCat)}」还没有记录</div>`
       : '<div class="empty"><div class="big">🍃</div>本月还没有记录<br>点右下角 + 记一笔</div>';
     return;
   }
@@ -719,11 +737,11 @@ function renderLedger(){
       const c = catName(t.category);
       const ch = channelName(t.channel);
       const signed = (t.type==='income'?'+':'−') + fmt(t.amount);
-      html += `<div class="item" data-id="${t.id}">
-        <div class="emoji" style="background:${hexA(c.color,.12)}">${c.emoji}</div>
+      html += `<div class="item" data-id="${esc(t.id)}">
+        <div class="emoji" style="background:${hexA(c.color,.12)}">${esc(c.emoji)}</div>
         <div class="info">
-          <div class="cat">${c.name}<span class="chb" style="color:${ch.color};border-color:${hexA(ch.color,.35)};background:${hexA(ch.color,.1)}">${ch.emoji} ${ch.name}</span></div>
-          <div class="note">${t.note || (t.type==='income'?'收入':c.name)}</div>
+          <div class="cat">${esc(c.name)}<span class="chb" style="color:${ch.color};border-color:${hexA(ch.color,.35)};background:${hexA(ch.color,.1)}">${esc(ch.emoji)} ${esc(ch.name)}</span></div>
+          <div class="note">${esc(t.note || (t.type==='income'?'收入':c.name))}</div>
         </div>
         <div class="amt ${t.type==='income'?'income':'expense'}">${signed}</div>
       </div>`;
@@ -774,7 +792,7 @@ function renderChannelStats(list, exp){
     const pct = exp>0 ? (item.value/exp*100) : 0;
     return `<li>
       <span class="dot" style="background:${ch.color}"></span>
-      <span class="name">${ch.emoji} ${ch.name}</span>
+      <span class="name">${esc(ch.emoji)} ${esc(ch.name)}</span>
       <span class="pct">${pct.toFixed(1)}%</span>
       <span class="amt">¥${fmtSci(item.value)}</span>
     </li>`;
@@ -924,7 +942,7 @@ function renderLegend(sorted, total){
     const pct = total>0 ? (item.value/total*100) : 0;
     return `<li>
       <span class="dot" style="background:${c.color}"></span>
-      <span class="name">${c.emoji} ${c.name}</span>
+      <span class="name">${esc(c.emoji)} ${esc(c.name)}</span>
       <span class="pct">${pct.toFixed(1)}%</span>
       <span class="amt">¥${fmtSci(item.value)}</span>
     </li>`;
@@ -1024,10 +1042,15 @@ function saveEntry(){
 
 function delEntry(){
   if(!editingId) return;
+  document.getElementById('confirmOverlay').classList.add('show');
+}
+function confirmDel(){
+  if(!editingId){ closeConfirm(); return; }
   data = data.filter(t=>t.id!==editingId);
-  save(); closeSheet(); renderAll();
+  save(); closeSheet(); closeConfirm(); renderAll();
   toast('已删除');
 }
+function closeConfirm(){ document.getElementById('confirmOverlay').classList.remove('show'); }
 
 /* ============ 月份选择器 ============ */
 function todayYear(){ return new Date().getFullYear(); }
@@ -1083,9 +1106,9 @@ function pickFile(){
   const input = document.createElement('input');
   input.type = 'file';
   // 兼容扩展名 + iOS 常见 MIME（含 octet-stream，避免文件被灰掉选不了）
-  input.accept = '.csv,.txt,.json,.xlsx,.xls,.CSV,.JSON,.XLSX,' +
+  input.accept = '.csv,.txt,.json,.xlsx,.CSV,.JSON,.XLSX,' +
     'text/csv,text/plain,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,' +
-    'application/vnd.ms-excel,application/octet-stream,text/*';
+    'application/octet-stream,text/*';
   input.style.display = 'none';
   document.body.appendChild(input);   // 挂到 DOM，iOS 更稳
   let done = false;
@@ -1109,7 +1132,13 @@ function pickFile(){
       rd.readAsText(f, 'utf-8');
       return;
     }
-    const isXlsx = /\.xlsx$|\.xls$|application\/vnd\.openxmlformats|ms-excel|officeDocument/i.test(f.name + (f.type||''));
+    // 明确不支持旧版二进制 .xls，给提示而不是静默失败
+    if(/\.xls$|application\/vnd\.ms-excel/i.test(f.name + (f.type||''))){
+      cleanup();
+      toast('暂不支持旧版 .xls 表格，请导出为 .xlsx 或 CSV');
+      return;
+    }
+    const isXlsx = /\.xlsx$|application\/vnd\.openxmlformats|officeDocument/i.test(f.name + (f.type||''));
     showProgress('正在读取账单…');
     setTimeout(() => {
       const rd = new FileReader();
@@ -1498,7 +1527,7 @@ function guessChannel(pay, desc, party){
 
 function genId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 function isDup(r){
-  return data.some(t => t.date===r.date && t.amount===r.amount && t.category===r.category && t.note===r.note);
+  return data.some(t => t.date===r.date && t.type===r.type && t.amount===r.amount && t.category===r.category && t.note===r.note);
 }
 
 /* ============ 渲染总调度 ============ */
@@ -1569,6 +1598,9 @@ function bind(){
   // 保存/删除/关闭
   document.getElementById('saveBtn').onclick = saveEntry;
   document.getElementById('delBtn').onclick = delEntry;
+  document.getElementById('confirmDelBtn').onclick = confirmDel;
+  document.getElementById('confirmCancelBtn').onclick = closeConfirm;
+  document.getElementById('confirmOverlay').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeConfirm(); });
   overlay.addEventListener('click', e=>{ if(e.target===overlay) closeSheet(); });
 
   // 备份 / 导入弹窗
