@@ -1041,16 +1041,36 @@ function importBill(){
 function pickFile(){
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = '.csv,.txt,.xlsx,.xls';
+  // 兼容扩展名 + iOS 常见 MIME（含 octet-stream，避免文件被灰掉选不了）
+  input.accept = '.csv,.txt,.xlsx,.xls,.CSV,.XLSX,' +
+    'text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,' +
+    'application/vnd.ms-excel,application/octet-stream,text/*';
+  input.style.display = 'none';
+  document.body.appendChild(input);   // 挂到 DOM，iOS 更稳
+  let done = false;
+  const cleanup = () => {
+    setTimeout(()=>{ if(input.parentNode) input.parentNode.removeChild(input); }, 50);
+  };
   input.onchange = () => {
+    if(done) return; done = true;
     const f = input.files[0];
-    if(!f) return;
-    const isXlsx = /\.xlsx$|\.xls$|application\/vnd.openxmlformats|ms-excel|spreadsheet/i.test(f.name + (f.type||''));
-    // 先显示遮罩（阻塞其他操作），用 setTimeout 让遮罩先渲染出来再开始耗时解析
+    if(!f){ cleanup(); return; }
+    const isXlsx = /\.xlsx$|\.xls$|application\/vnd\.openxmlformats|ms-excel|officeDocument/i.test(f.name + (f.type||''));
     showProgress('正在读取账单…');
     setTimeout(() => {
       const rd = new FileReader();
+      // 读取失败/中断兜底：明确提示，别让界面"卡住没反应"
+      const readFailed = (msg) => {
+        clearTimeout(readTimer);
+        hideProgress(); cleanup();
+        toast(msg || '文件读取失败，请重试（iCloud 文件请先下载到手机本地）');
+      };
+      const readTimer = setTimeout(()=>{
+        readFailed('读取超时：文件可能未下载完毕，请下载到本地后重试');
+      }, 20000);
       rd.onload = () => {
+        clearTimeout(readTimer);
+        cleanup();
         const buf = rd.result; // ArrayBuffer
         let text;
         if(isXlsx){
@@ -1071,9 +1091,13 @@ function pickFile(){
           mergeAndFinish(text);
         }
       };
+      rd.onerror = () => readFailed('文件读取失败，请重试');
+      rd.onabort = () => readFailed('读取被中断，请重新选择文件');
       rd.readAsArrayBuffer(f);
     }, 30);
   };
+  // 取消选择：清理 input，不做任何提示（正常取消不算错误）
+  input.addEventListener('cancel', ()=>{ if(!done){ done=true; cleanup(); } });
   input.click();
 }
 
