@@ -118,8 +118,14 @@
   .chan-grid .ch .e{font-size:15px;line-height:1;}
   .chan-grid .ch.sel{border-color:var(--c);background:var(--cgbg);color:var(--c);font-weight:600;}
   .chan-grid .ch.sel .e{transform:scale(1.05);}
-  #importBtn{margin:0 auto 16px;display:block;padding:10px 18px;border:1px solid var(--primary);
-    background:#fff;color:var(--primary);border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;}
+  /* ===== 分类筛选条（记账页顶部） ===== */
+  .cat-filter{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 10px;margin-bottom:6px;
+    -webkit-overflow-scrolling:touch;scrollbar-width:none;}
+  .cat-filter::-webkit-scrollbar{display:none;}
+  .cat-filter .cf{flex-shrink:0;padding:7px 13px;border-radius:18px;border:1.5px solid #e3e8f0;
+    background:#fff;font-size:13px;color:var(--ink-2);cursor:pointer;white-space:nowrap;}
+  .cat-filter .cf.sel{background:var(--cgbg,#eef4ff);border-color:var(--c,var(--primary));
+    color:var(--c,var(--primary));font-weight:600;}
   .item .amt{font-size:16px;font-weight:700;white-space:nowrap;}
   .amt.expense{color:var(--expense);}
   .amt.income{color:var(--income);}
@@ -269,6 +275,14 @@
     width:34px;height:34px;border-radius:10px;font-size:16px;line-height:1;margin-left:8px;
     display:inline-flex;align-items:center;justify-content:center;}
   #backupBtn:active{background:rgba(255,255,255,.3);}
+  .bk-item{display:flex;gap:10px;margin-top:10px;}
+  .bk-item button{flex:1;border:none;border-radius:12px;padding:13px;font-size:14px;
+    font-weight:600;cursor:pointer;}
+  .bk-item .bk-export{background:linear-gradient(135deg,var(--primary),var(--primary-dark));color:#fff;
+    box-shadow:0 2px 10px rgba(91,141,239,.3);}
+  .bk-item .bk-import{background:#fff;color:var(--primary);border:1.5px solid var(--primary);}
+  .bk-tip{font-size:12px;line-height:1.7;color:var(--ink-2);margin-top:12px;
+    background:#f4f7fc;border-radius:10px;padding:10px 12px;}
 
   /* ===== 导入进度遮罩 ===== */
   #progressOverlay{position:fixed;inset:0;z-index:70;background:rgba(20,28,45,.55);
@@ -314,7 +328,7 @@
       <button id="nextMonth" aria-label="下个月">›</button>
     </div>
     <button id="todayBtn">回到本月</button>
-    <button id="backupBtn" title="导出备份" onclick="exportBackup()">💾</button>
+    <button id="backupBtn" title="备份 / 导入">💾</button>
   </div>
   <div class="summary">
     <div class="s-label">本月支出</div>
@@ -331,7 +345,7 @@
   <!-- 记账 tab -->
   <section id="panel-ledger" class="panel active">
     <div id="importReminder" style="display:none;" class="import-remind"></div>
-    <button id="importBtn" role="button">📥 导入</button>
+    <div class="cat-filter" id="catFilter"></div>
     <div id="ledgerList"></div>
   </section>
 
@@ -450,6 +464,23 @@
   </div>
 </div>
 
+<!-- 备份 / 导入 -->
+<div class="overlay" id="backupOverlay">
+  <div class="sheet">
+    <div class="grab"></div>
+    <h2>💾 备份 / 导入</h2>
+    <div class="bk-item">
+      <button class="bk-export" id="bkExport">⬇️ 导出备份</button>
+      <button class="bk-import" id="bkImport">📥 导入</button>
+    </div>
+    <div class="bk-tip">
+      📤 <b>导出备份</b>：保存全部账目到一个文件，可发给另一台设备。
+      <br>📥 <b>导入</b>：选账单（微信/支付宝 csv、xlsx）或备份（json），自动识别并合并。
+      <br>🔒 数据仅保存在你的设备上，不上传任何服务器。
+    </div>
+  </div>
+</div>
+
 <script>
 /* ============ 数据模型 ============ */
 const CATEGORIES = [
@@ -478,6 +509,7 @@ const BUDGET_KEY = 'expense-budget-v1';
 let data = load();
 let budget = loadBudget(); // {total:Number, cats:{Name:Number}}
 let viewMonth = currentMonth(); // YYYY-MM
+let viewCat = '';               // 分类筛选：''=全部
 let currentTab = 'ledger';
 let editingId = null;
 let pickerYear = new Date().getFullYear(); // 月份选择器当前展示的年份
@@ -502,7 +534,9 @@ function loadBudget(){
 function saveBudget(){ localStorage.setItem(BUDGET_KEY, JSON.stringify(budget)); }
 function totalBudget(){ return parseFloat(budget.total)||0; }
 
-/* ============ 备份 / 恢复 ============ */
+/* ============ 备份 / 导入 ============ */
+function openBackup(){ document.getElementById('backupOverlay').classList.add('show'); }
+function closeBackup(){ document.getElementById('backupOverlay').classList.remove('show'); }
 // 导出：打包 data + budget 为 JSON 文件下载
 function exportBackup(){
   const payload = {
@@ -522,6 +556,7 @@ function exportBackup(){
   document.body.removeChild(a);
   setTimeout(()=>URL.revokeObjectURL(url), 1000);
   toast('已导出备份文件 ✓');
+  closeBackup();
 }
 
 // 恢复：读取备份 JSON，按 id 去重合并到当前数据（供统一导入入口调用）
@@ -616,11 +651,38 @@ function renderHeader(){
 }
 
 /* ============ 记账列表 ============ */
+// 分类筛选条（顶部横滑胶囊：全部 + 支出分类 + 收入分类去重）
+function renderCatFilter(){
+  const el = document.getElementById('catFilter');
+  if(!el) return;
+  const cats = [{name:'', emoji:'📋', color:null}]
+    .concat(CATEGORIES)
+    .concat(INCOME_CATS.filter(c=>!CATEGORIES.some(e=>e.name===c.name))); // 收入类去重后追加
+  el.innerHTML = cats.map(c => {
+    const sel = c.name===viewCat;
+    const col = c.color || 'var(--primary)';
+    const bg = c.color ? hexA(c.color,.14) : '#eef4ff';
+    return `<div class="cf${sel?' sel':''}" data-cat="${c.name}"
+      style="${sel?`--c:${col};--cgbg:${bg};`:''}">${c.emoji||c.name} ${c.emoji?c.name:''}</div>`;
+  }).join('');
+  el.querySelectorAll('.cf').forEach(chip => {
+    chip.onclick = () => {
+      viewCat = chip.dataset.cat;
+      renderCatFilter();
+      renderLedger();
+    };
+  });
+}
+
 function renderLedger(){
-  const list = monthTransactions(viewMonth).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  const all = monthTransactions(viewMonth).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  // 按分类名筛选（任意支出/收入的记录匹配即显示）
+  const list = viewCat ? all.filter(t => t.category===viewCat) : all;
   const wrap = document.getElementById('ledgerList');
   if(list.length===0){
-    wrap.innerHTML = '<div class="empty"><div class="big">🍃</div>本月还没有记录<br>点右下角 + 记一笔</div>';
+    wrap.innerHTML = viewCat
+      ? `<div class="empty"><div class="big">🍃</div>本月「${viewCat}」还没有记录</div>`
+      : '<div class="empty"><div class="big">🍃</div>本月还没有记录<br>点右下角 + 记一笔</div>';
     return;
   }
   // 按日期分组
@@ -1020,6 +1082,7 @@ function pickFile(){
       rd.onload = () => {
         cleanup();
         restoreBackupText(rd.result);
+        closeBackup();
       };
       rd.onerror = () => { cleanup(); toast('备份文件读取失败，请重试'); };
       rd.readAsText(f, 'utf-8');
@@ -1421,7 +1484,7 @@ function isDup(r){
 
 /* ============ 渲染总调度 ============ */
 function renderAll(){
-  renderHeader(); renderLedger(); renderStats();
+  renderHeader(); renderCatFilter(); renderLedger(); renderStats();
   checkImportReminder();
 }
 
@@ -1470,9 +1533,6 @@ function bind(){
   // FAB
   document.getElementById('fabAdd').onclick = ()=>openSheet(null);
 
-  // 导入账单
-  document.getElementById('importBtn').onclick = importBill;
-
   // 点击列表项编辑
   document.getElementById('ledgerList').addEventListener('click', e=>{
     const item = e.target.closest('.item');
@@ -1487,8 +1547,11 @@ function bind(){
   document.getElementById('delBtn').onclick = delEntry;
   overlay.addEventListener('click', e=>{ if(e.target===overlay) closeSheet(); });
 
-  // 备份：右上角 💾 一键导出
-  document.getElementById('backupBtn').onclick = exportBackup;
+  // 备份 / 导入弹窗
+  document.getElementById('backupBtn').onclick = openBackup;
+  document.getElementById('bkExport').onclick = exportBackup;
+  document.getElementById('bkImport').onclick = pickFile;
+  document.getElementById('backupOverlay').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeBackup(); });
 }
 
 bind();
