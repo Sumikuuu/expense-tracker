@@ -57,9 +57,6 @@
   #monthBtn:active{background:rgba(255,255,255,.3);}
   #monthBtn .caret{font-size:10px;opacity:.85;line-height:1;}
   #monthLabel{font-size:17px;font-weight:600;line-height:1;}
-  #todayBtn{background:rgba(255,255,255,.16);border:none;color:#fff;cursor:pointer;
-    padding:0 12px;height:34px;border-radius:10px;font-size:12px;
-    display:inline-flex;align-items:center;white-space:nowrap;}
   .summary{margin-top:14px;}
   .summary .s-label{font-size:12px;opacity:.9;}
   .summary .s-big{font-size:34px;font-weight:700;letter-spacing:.5px;}
@@ -327,7 +324,6 @@
       <button id="monthBtn" aria-label="选择月份"><span id="monthLabel">本月</span><span class="caret">▾</span></button>
       <button id="nextMonth" aria-label="下个月">›</button>
     </div>
-    <button id="todayBtn">回到本月</button>
     <button id="backupBtn" title="备份 / 导入">💾</button>
   </div>
   <div class="summary">
@@ -447,7 +443,7 @@
       <button id="mpPrev" aria-label="上一年">‹</button>
       <span id="mpYear">2026</span>
       <button id="mpNext" aria-label="下一年">›</button>
-      <button class="mp-today" id="mpToday">今年</button>
+      <button class="mp-today" id="mpToday">回到本月</button>
     </div>
     <div class="month-grid" id="monthGrid"></div>
   </div>
@@ -1524,7 +1520,6 @@ function bind(){
     viewMonth = (m===12 ? (y+1)+'-01' : y+'-'+String(m+1).padStart(2,'0'));
     renderAll();
   };
-  document.getElementById('todayBtn').onclick = ()=>{ viewMonth = currentMonth(); renderAll(); };
 
   // 总预算输入（一次性绑定）
   document.getElementById('budgetTotal').addEventListener('input', ()=>{
@@ -1538,7 +1533,13 @@ function bind(){
   document.getElementById('monthBtn').onclick = openMonthPicker;
   document.getElementById('mpPrev').onclick = ()=>{ pickerYear--; renderMonthGrid(); };
   document.getElementById('mpNext').onclick = ()=>{ pickerYear++; renderMonthGrid(); };
-  document.getElementById('mpToday').onclick = ()=>{ pickerYear = todayYear(); renderMonthGrid(); };
+  document.getElementById('mpToday').onclick = ()=>{
+    viewMonth = currentMonth();
+    pickerYear = todayYear();
+    renderMonthGrid();
+    closeMonthPicker();
+    renderAll();
+  };
   document.getElementById('monthOverlay').addEventListener('click', e=>{
     if(e.target===e.currentTarget) closeMonthPicker();
   });
