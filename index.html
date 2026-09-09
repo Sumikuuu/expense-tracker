@@ -77,7 +77,8 @@
     padding-bottom:env(safe-area-inset-bottom,0px);
     box-shadow:0 -2px 14px rgba(30,45,80,.06);
   }
-  nav.tabs .tab{flex:1;text-align:center;padding:10px 0 12px;cursor:pointer;color:var(--ink-3);}
+  nav.tabs .tab{flex:1;text-align:center;padding:10px 0 12px;cursor:pointer;color:var(--ink-3);
+    background:none;border:none;font:inherit;}
   nav.tabs .tab svg{display:block;margin:0 auto;width:24px;height:24px;}
   nav.tabs .tab span{display:block;font-size:11px;margin-top:3px;}
   nav.tabs .tab.active{color:var(--primary);}
@@ -96,6 +97,7 @@
     display:flex;align-items:center;gap:12px;background:var(--card);
     border-radius:var(--radius);padding:12px 14px;margin-bottom:8px;
     box-shadow:var(--shadow);cursor:pointer;transition:opacity .2s,transform .2s;
+    width:100%;border:none;font:inherit;color:inherit;text-align:left;
   }
   .item:active{transform:scale(.98);}
   .item .emoji{
@@ -103,15 +105,15 @@
     justify-content:center;font-size:22px;flex-shrink:0;
   }
   .item .info{flex:1;min-width:0;}
-  .item .info .cat{font-size:15px;font-weight:600;}
-  .item .info .note{font-size:12px;color:var(--ink-3);margin-top:2px;
+  .item .info .cat{display:block;font-size:15px;font-weight:600;}
+  .item .info .note{display:block;font-size:12px;color:var(--ink-3);margin-top:2px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .item .cat .chb{font-size:10px;font-weight:600;margin-left:6px;padding:1px 6px;
     border-radius:8px;border:1px solid transparent;vertical-align:1px;white-space:nowrap;}
   .chan-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;}
   .chan-grid .ch{display:flex;align-items:center;gap:6px;padding:9px 13px;
     border-radius:20px;border:1.5px solid #e3e8f0;background:#fff;font-size:13px;
-    cursor:pointer;color:var(--ink-2);}
+    cursor:pointer;color:var(--ink-2);font-family:inherit;}
   .chan-grid .ch .e{font-size:15px;line-height:1;}
   .chan-grid .ch.sel{border-color:var(--c);background:var(--cgbg);color:var(--c);font-weight:600;}
   .chan-grid .ch.sel .e{transform:scale(1.05);}
@@ -120,7 +122,8 @@
     -webkit-overflow-scrolling:touch;scrollbar-width:none;}
   .cat-filter::-webkit-scrollbar{display:none;}
   .cat-filter .cf{flex-shrink:0;padding:7px 13px;border-radius:18px;border:1.5px solid #e3e8f0;
-    background:#fff;font-size:13px;color:var(--ink-2);cursor:pointer;white-space:nowrap;}
+    background:#fff;font-size:13px;color:var(--ink-2);cursor:pointer;white-space:nowrap;
+    font-family:inherit;}
   .cat-filter .cf.sel{background:var(--cgbg,#eef4ff);border-color:var(--c,var(--primary));
     color:var(--c,var(--primary));font-weight:600;}
   .item .amt{font-size:16px;font-weight:700;white-space:nowrap;}
@@ -170,13 +173,13 @@
   /* ===== 预算 ===== */
   .budget-form label{display:block;font-size:13px;color:var(--ink-2);margin-bottom:4px;}
   .budget-form > input{width:100%;border:1px solid #dfe4ec;background:#fff;border-radius:10px;
-    padding:11px 12px;font-size:15px;outline:none;margin-bottom:10px;}
+    padding:11px 12px;font-size:16px;outline:none;margin-bottom:10px;}
   .budget-cats .bc{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f2f4f8;}
   .budget-cats .bc:last-child{border-bottom:none;}
   .budget-cats .bc .bc-emoji{width:26px;text-align:center;font-size:18px;flex-shrink:0;}
   .budget-cats .bc .bc-name{width:52px;font-size:13px;color:var(--ink);flex-shrink:0;}
   .budget-cats .bc input{flex:1;border:none;background:transparent;border-bottom:1px dashed #d5dbe6;
-    font-size:14px;color:var(--ink);outline:none;text-align:right;padding:4px 2px;}
+    font-size:16px;color:var(--ink);outline:none;text-align:right;padding:4px 2px;}
   .budget-cats .bc input.warn{color:var(--expense);font-weight:700;border-bottom-color:var(--expense);}
 
   #trendWrap{display:flex;justify-content:center;}
@@ -217,7 +220,7 @@
   .month-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
   .month-grid .m{
     padding:14px 0;text-align:center;border-radius:12px;border:1px solid #e6eaf2;background:#fff;
-    font-size:15px;cursor:pointer;color:var(--ink);
+    font-size:15px;cursor:pointer;color:var(--ink);font-family:inherit;
   }
   .month-grid .m:active{background:#f0f4fc;}
   .month-grid .m.sel{border-color:var(--primary);background:#eef4ff;color:var(--primary);font-weight:700;}
@@ -233,6 +236,7 @@
   .cat-grid .c{
     display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 4px;
     border-radius:14px;cursor:pointer;border:2px solid transparent;background:#fff;
+    font-family:inherit;
   }
   .cat-grid .c .e{font-size:26px;}
   .cat-grid .c .n{font-size:12px;color:var(--ink-2);}
@@ -243,11 +247,11 @@
   .rowlab{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:14px;color:var(--ink-2);}
   .rowlab input,.rowlab select{
     flex:1;border:1px solid #dfe4ec;background:#fff;border-radius:10px;padding:10px 12px;
-    font-size:15px;color:var(--ink);outline:none;
+    font-size:16px;color:var(--ink);outline:none;
   }
   .field{margin-top:12px;font-size:13px;color:var(--ink-2);}
   .field input{width:100%;border:1px solid #dfe4ec;background:#fff;border-radius:10px;
-    padding:11px 12px;font-size:15px;outline:none;margin-top:6px;}
+    padding:11px 12px;font-size:16px;outline:none;margin-top:6px;}
 
   .save-btn{
     width:100%;margin-top:20px;border:none;border-radius:14px;padding:14px;
@@ -327,7 +331,31 @@
     border-radius:12px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#8a6d1a;}
   .import-remind button{margin-left:auto;background:#f5a623;color:#fff;border:none;border-radius:9px;
     padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;}
-  .import-remind .x{cursor:pointer;color:#b5923f;font-size:15px;padding:0 2px;flex-shrink:0;}
+  .import-remind .x{cursor:pointer;color:#b5923f;font-size:15px;padding:0 2px;flex-shrink:0;
+    background:none;border:none;font-family:inherit;line-height:1;}
+
+  /* ===== 桌面端：悬停反馈 + 键盘焦点（触屏不触发，避免 hover 粘滞） ===== */
+  @media (hover:hover) and (pointer:fine){
+    .item:hover{background:#fbfcff;box-shadow:0 6px 22px rgba(30,45,80,.13);}
+    .cat-filter .cf:hover,.chan-grid .ch:hover,.month-grid .m:hover,.cat-grid .c:hover{background:#f2f6fd;}
+    nav.tabs .tab:hover{color:var(--primary);}
+    .month-nav button:hover,#monthBtn:hover,#backupBtn:hover{background:rgba(255,255,255,.3);}
+    .seg button:hover{color:var(--ink);}
+    .picker-year button:hover{background:#eef1f6;}
+    .delete-btn:hover{background:#fff5f5;}
+    .bk-item .bk-import:hover{background:#eef4ff;}
+    .save-btn:hover,.bk-item .bk-export:hover{filter:brightness(1.06);}
+    button.fab:hover{transform:scale(1.05);}
+    /* 宽屏下让分类筛选条的横向滚动可被发现：显示细滚动条（触屏仍隐藏） */
+    .cat-filter{scrollbar-width:thin;scrollbar-color:#d5dbe6 transparent;}
+    .cat-filter::-webkit-scrollbar{display:block;height:6px;}
+    .cat-filter::-webkit-scrollbar-track{background:transparent;}
+    .cat-filter::-webkit-scrollbar-thumb{background:#d5dbe6;border-radius:3px;}
+    .cat-filter::-webkit-scrollbar-thumb:hover{background:#c2cad8;}
+  }
+  :focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
+  header.top :focus-visible{outline-color:#fff;}
+  .item:focus-visible{outline-offset:-2px;}
 </style>
 </head>
 <body>
@@ -399,14 +427,14 @@
 <button class="fab" id="fabAdd" aria-label="记一笔">＋</button>
 
 <nav class="tabs">
-  <div class="tab active" data-tab="ledger">
+  <button type="button" class="tab active" data-tab="ledger">
     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
     <span>记账</span>
-  </div>
-  <div class="tab" data-tab="stats">
+  </button>
+  <button type="button" class="tab" data-tab="stats">
     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-6M22 20H2"/></svg>
     <span>统计</span>
-  </div>
+  </button>
 </nav>
 
 <!-- 添加/编辑 弹窗 -->
@@ -798,8 +826,8 @@ function renderCatFilter(){
     const col = c.color || 'var(--primary)';
     const bg = c.color ? hexA(c.color,.14) : '#eef4ff';
     const label = c.label || (c.emoji+ (c.name?' '+c.name:''));
-    return `<div class="cf${sel?' sel':''}" data-cat="${esc(c.name)}"
-      style="${sel?`--c:${col};--cgbg:${bg};`:''}">${esc(label)}</div>`;
+    return `<button type="button" class="cf${sel?' sel':''}" data-cat="${esc(c.name)}"
+      style="${sel?`--c:${col};--cgbg:${bg};`:''}">${esc(label)}</button>`;
   }).join('');
   el.querySelectorAll('.cf').forEach(chip => {
     chip.onclick = () => {
@@ -835,14 +863,14 @@ function renderLedger(){
       const c = catName(t.category);
       const ch = channelName(t.channel);
       const signed = (t.type==='income'?'+':'−') + fmt(t.amount);
-      html += `<div class="item" data-id="${esc(t.id)}">
-        <div class="emoji" style="background:${hexA(c.color,.12)}">${esc(c.emoji)}</div>
-        <div class="info">
-          <div class="cat">${esc(c.name)}<span class="chb" style="color:${ch.color};border-color:${hexA(ch.color,.35)};background:${hexA(ch.color,.1)}">${esc(ch.emoji)} ${esc(ch.name)}</span></div>
-          <div class="note">${esc(t.note || (t.type==='income'?'收入':c.name))}</div>
-        </div>
-        <div class="amt ${t.type==='income'?'income':'expense'}">${signed}</div>
-      </div>`;
+      html += `<button type="button" class="item" data-id="${esc(t.id)}">
+        <span class="emoji" style="background:${hexA(c.color,.12)}">${esc(c.emoji)}</span>
+        <span class="info">
+          <span class="cat">${esc(c.name)}<span class="chb" style="color:${ch.color};border-color:${hexA(ch.color,.35)};background:${hexA(ch.color,.1)}">${esc(ch.emoji)} ${esc(ch.name)}</span></span>
+          <span class="note">${esc(t.note || (t.type==='income'?'收入':c.name))}</span>
+        </span>
+        <span class="amt ${t.type==='income'?'income':'expense'}">${signed}</span>
+      </button>`;
     });
     html += '</div>';
   });
@@ -1079,8 +1107,8 @@ function setType(type){
   // 收入也给几个分类
   const cats = type==='expense' ? CATEGORIES : INCOME_CATS;
   const grid = document.getElementById('catGrid');
-  grid.innerHTML = cats.map(c=>`<div class="c" data-name="${c.name}"
-     style="--c:${c.color};--cgbg:${hexA(c.color,.14)}"><span class="e">${c.emoji}</span><span class="n">${c.name}</span></div>`).join('');
+  grid.innerHTML = cats.map(c=>`<button type="button" class="c" data-name="${c.name}"
+     style="--c:${c.color};--cgbg:${hexA(c.color,.14)}"><span class="e">${c.emoji}</span><span class="n">${c.name}</span></button>`).join('');
   grid.querySelectorAll('.c').forEach(el=>{
     el.addEventListener('click', ()=>{ setCat(el.dataset.name); });
   });
@@ -1102,8 +1130,8 @@ function setCat(name){
 
 function renderChannelGrid(){
   const grid = document.getElementById('chanGrid');
-  grid.innerHTML = CHANNELS.map(c=>`<div class="ch" data-name="${c.name}"
-    style="--c:${c.color};--cgbg:${hexA(c.color,.14)}"><span class="e">${c.emoji}</span><span class="n">${c.name}</span></div>`).join('');
+  grid.innerHTML = CHANNELS.map(c=>`<button type="button" class="ch" data-name="${c.name}"
+    style="--c:${c.color};--cgbg:${hexA(c.color,.14)}"><span class="e">${c.emoji}</span><span class="n">${c.name}</span></button>`).join('');
   grid.querySelectorAll('.ch').forEach(el=>{
     el.addEventListener('click', ()=>{ setChannel(el.dataset.name); });
   });
@@ -1168,7 +1196,8 @@ function renderMonthGrid(){
   const grid = document.getElementById('monthGrid');
   grid.innerHTML = '';
   for(let mo=1; mo<=12; mo++){
-    const b = document.createElement('div');
+    const b = document.createElement('button');
+    b.type = 'button';
     b.className = 'm'
       + (vy===pickerYear && vm===mo ? ' sel' : '')
       + (nowY===pickerYear && nowM===mo ? ' isNow' : '');
@@ -1398,8 +1427,8 @@ function checkImportReminder(){
   const label = lm.getFullYear()+'年'+(lm.getMonth()+1)+'月';
   el.innerHTML = `
     <span>⚠️ <b>${label}还没有账单</b>，要不要导入一下？</span>
-    <button id="remindGo">去导入</button>
-    <span class="x" id="remindX">✕</span>`;
+    <button type="button" id="remindGo">去导入</button>
+    <button type="button" class="x" id="remindX" aria-label="忽略本次提醒">✕</button>`;
   el.style.display = 'flex';
   el.querySelector('#remindGo').onclick = ()=>{ remindDismissed[lastYM]=true; saveRemindDismissed(); el.style.display='none'; importBill(); };
   el.querySelector('#remindX').onclick = ()=>{ remindDismissed[lastYM]=true; saveRemindDismissed(); el.style.display='none'; };
@@ -1762,6 +1791,15 @@ function bind(){
 
   // FAB
   document.getElementById('fabAdd').onclick = ()=>openSheet(null);
+
+  // 桌面鼠标：滚轮横向滚动分类筛选条（触屏本来就能滑动，故只在需要滚动时接管）
+  const catFilterEl = document.getElementById('catFilter');
+  catFilterEl.addEventListener('wheel', e => {
+    if(catFilterEl.scrollWidth <= catFilterEl.clientWidth) return;   // 未溢出则不拦截
+    const d = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+    catFilterEl.scrollLeft += d;
+    e.preventDefault();
+  }, {passive:false});
 
   // 点击列表项编辑
   document.getElementById('ledgerList').addEventListener('click', e=>{
