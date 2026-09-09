@@ -561,6 +561,8 @@
 </div>
 
 <script>
+(function(){
+'use strict';
 /* ============ 数据模型 ============ */
 const CATEGORIES = [
   {name:'餐饮', emoji:'🍜', color:'#ff6b6b'},
@@ -1914,6 +1916,8 @@ if('serviceWorker' in navigator){
     navigator.serviceWorker.register('service-worker.js').catch(()=>{});
   });
 }
+
+})();   // 结束 IIFE：所有函数与状态都封装在闭包内，不再污染 window
 </script>
 </body>
 </html>
