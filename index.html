@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="记账">
@@ -356,6 +356,22 @@
   :focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
   header.top :focus-visible{outline-color:#fff;}
   .item:focus-visible{outline-offset:-2px;}
+
+  /* ===== 宽屏（平板/桌面）：底部标签栏改为左侧导航，消除手机版式留白 ===== */
+  @media (min-width:768px){
+    body{padding-bottom:40px;padding-left:88px;}
+    nav.tabs{top:0;bottom:0;left:0;right:auto;width:88px;flex-direction:column;
+      justify-content:flex-start;border-top:none;border-right:1px solid #eceff4;
+      padding:14px 8px 0;box-shadow:2px 0 14px rgba(30,45,80,.06);}
+    nav.tabs .tab{flex:0 0 auto;border-radius:14px;padding:14px 0;margin-bottom:6px;}
+    nav.tabs .tab.active{background:#eef4ff;}
+    button.fab{bottom:32px;right:32px;}
+    main{max-width:760px;}
+    /* 宽屏下弹窗居中，改用淡入缩放动画（底部上滑在桌面上显得别扭） */
+    .overlay{align-items:center;padding:24px;}
+    .sheet{border-radius:22px;max-height:86vh;padding:8px 18px 18px;animation:pop .2s ease;}
+    @keyframes pop{from{opacity:0;transform:scale(.96) translateY(10px);}to{opacity:1;transform:none;}}
+  }
 </style>
 </head>
 <body>
@@ -364,10 +380,10 @@
   <div class="top-row">
     <div class="month-nav">
       <button id="prevMonth" aria-label="上个月">‹</button>
-      <button id="monthBtn" aria-label="选择月份"><span id="monthLabel">本月</span><span class="caret">▾</span></button>
+      <button id="monthBtn" aria-label="选择月份" aria-haspopup="dialog"><span id="monthLabel">本月</span><span class="caret">▾</span></button>
       <button id="nextMonth" aria-label="下个月">›</button>
     </div>
-    <button id="backupBtn" title="备份 / 导入">💾</button>
+    <button id="backupBtn" title="备份 / 导入" aria-label="备份或导入" aria-haspopup="dialog">💾</button>
   </div>
   <div class="summary">
     <div class="s-label">本月支出</div>
@@ -426,8 +442,8 @@
 
 <button class="fab" id="fabAdd" aria-label="记一笔">＋</button>
 
-<nav class="tabs">
-  <button type="button" class="tab active" data-tab="ledger">
+<nav class="tabs" aria-label="主导航">
+  <button type="button" class="tab active" data-tab="ledger" aria-current="page">
     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
     <span>记账</span>
   </button>
@@ -439,7 +455,7 @@
 
 <!-- 添加/编辑 弹窗 -->
 <div class="overlay" id="overlay">
-  <div class="sheet">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" tabindex="-1">
     <div class="grab"></div>
     <h2 id="sheetTitle">记一笔</h2>
 
@@ -479,9 +495,9 @@
 
 <!-- 删除确认 -->
 <div class="overlay" id="confirmOverlay">
-  <div class="sheet">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" tabindex="-1">
     <div class="grab"></div>
-    <h2>删除这条记录？</h2>
+    <h2 id="confirmTitle">删除这条记录？</h2>
     <p class="confirm-note">删除后无法恢复，确定要删除吗？</p>
     <button class="save-btn" id="confirmDelBtn">确定删除</button>
     <button class="delete-btn" id="confirmCancelBtn" style="color:var(--primary);background:#fff;border:1.5px solid var(--primary);">取消</button>
@@ -490,9 +506,9 @@
 
 <!-- 导入预览确认 -->
 <div class="overlay" id="previewOverlay">
-  <div class="sheet">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="previewTitle" tabindex="-1">
     <div class="grab"></div>
-    <h2>确认导入</h2>
+    <h2 id="previewTitle">确认导入</h2>
     <div class="pv-summary" id="pvSummary"></div>
     <div class="pv-list" id="pvList"></div>
     <button class="save-btn" id="pvConfirm">确认导入</button>
@@ -503,9 +519,9 @@
 
 <!-- 月份选择器 -->
 <div class="overlay" id="monthOverlay">
-  <div class="sheet">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="monthTitle" tabindex="-1">
     <div class="grab"></div>
-    <h2>选择月份</h2>
+    <h2 id="monthTitle">选择月份</h2>
     <div class="picker-year">
       <button id="mpPrev" aria-label="上一年">‹</button>
       <span id="mpYear">2026</span>
@@ -516,22 +532,22 @@
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <!-- 导入进度遮罩：阻塞其他操作 -->
-<div id="progressOverlay">
+<div id="progressOverlay" role="dialog" aria-modal="true" aria-labelledby="progTitle">
   <div class="progress-box">
     <div class="p-title" id="progTitle">正在导入…</div>
     <div class="progress-track"><div class="progress-fill" id="progFill"></div></div>
-    <div class="p-text" id="progText"><span class="p-spin"></span>请稍候，勿操作</div>
+    <div class="p-text" id="progText" aria-live="polite"><span class="p-spin"></span>请稍候，勿操作</div>
   </div>
 </div>
 
 <!-- 备份 / 导入 -->
 <div class="overlay" id="backupOverlay">
-  <div class="sheet">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="backupTitle" tabindex="-1">
     <div class="grab"></div>
-    <h2>💾 备份 / 导入</h2>
+    <h2 id="backupTitle">💾 备份 / 导入</h2>
     <div class="bk-item">
       <button class="bk-export" id="bkExport">📤 导出备份</button>
       <button class="bk-import" id="bkImport">📥 导入</button>
@@ -648,9 +664,61 @@ function saveBudget(){
 }
 function totalBudget(){ return parseFloat(budget.total)||0; }
 
+/* ============ 弹窗通用控制：焦点管理 / Escape / 背景滚动锁定 ============ */
+const overlayStack = [];                  // 已打开的遮罩 id，后进先出
+const overlayReturnFocus = new Map();     // 每个遮罩打开前的焦点位置
+function lockBodyScroll(lock){ document.body.style.overflow = lock ? 'hidden' : ''; }
+function openOverlayEl(id){
+  const el = document.getElementById(id);
+  if(!el || el.classList.contains('show')) return;
+  overlayReturnFocus.set(id, document.activeElement);
+  el.classList.add('show');
+  if(overlayStack.indexOf(id) < 0) overlayStack.push(id);
+  lockBodyScroll(true);
+  // 聚焦对话框容器本身：读屏会念出 aria-labelledby 的标题，又不会在手机上弹出键盘
+  const sheet = el.querySelector('.sheet');
+  if(sheet) sheet.focus();
+}
+function closeOverlayEl(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.classList.remove('show');
+  const i = overlayStack.indexOf(id);
+  if(i > -1) overlayStack.splice(i, 1);
+  if(!overlayStack.length) lockBodyScroll(false);
+  const back = overlayReturnFocus.get(id);
+  overlayReturnFocus.delete(id);
+  if(back && back.isConnected && typeof back.focus === 'function') back.focus();   // 焦点归还
+}
+const OVERLAY_CLOSERS = {
+  overlay: () => closeSheet(),
+  confirmOverlay: () => closeConfirm(),
+  previewOverlay: () => closePreview(),
+  monthOverlay: () => closeMonthPicker(),
+  backupOverlay: () => closeBackup()
+};
+document.addEventListener('keydown', e => {
+  if(!overlayStack.length) return;
+  const topId = overlayStack[overlayStack.length - 1];
+  const el = document.getElementById(topId);
+  if(!el) return;
+  if(e.key === 'Escape'){                       // Esc 关闭最上层弹窗
+    if(OVERLAY_CLOSERS[topId]){ OVERLAY_CLOSERS[topId](); e.preventDefault(); }
+    return;
+  }
+  if(e.key !== 'Tab') return;                   // Tab 在弹窗内循环，不跑到背景
+  const items = [...el.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')]
+    .filter(x => x.offsetParent !== null || getComputedStyle(x).position === 'fixed');
+  if(!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  const onSheet = document.activeElement === el.querySelector('.sheet');
+  if(e.shiftKey && (document.activeElement === first || onSheet)){ last.focus(); e.preventDefault(); }
+  else if(!e.shiftKey && document.activeElement === last){ first.focus(); e.preventDefault(); }
+});
+
 /* ============ 备份 / 导入 ============ */
-function openBackup(){ document.getElementById('backupOverlay').classList.add('show'); }
-function closeBackup(){ document.getElementById('backupOverlay').classList.remove('show'); }
+function openBackup(){ openOverlayEl('backupOverlay'); }
+function closeBackup(){ closeOverlayEl('backupOverlay'); }
 // 导出：打包 data + budget 为 JSON 文件下载
 function exportBackup(){
   const payload = {
@@ -1093,9 +1161,9 @@ function openSheet(id){
   document.getElementById('delBtn').style.display = id ? 'block':'none';
   renderChannelGrid();
   setChannel(formChannel);
-  overlay.classList.add('show');
+  openOverlayEl('overlay');
 }
-function closeSheet(){ overlay.classList.remove('show'); }
+function closeSheet(){ closeOverlayEl('overlay'); }
 
 function setType(type){
   formType = type;
@@ -1169,7 +1237,7 @@ function saveEntry(){
 
 function delEntry(){
   if(!editingId) return;
-  document.getElementById('confirmOverlay').classList.add('show');
+  openOverlayEl('confirmOverlay');
 }
 function confirmDel(){
   if(!editingId){ closeConfirm(); return; }
@@ -1177,7 +1245,7 @@ function confirmDel(){
   save(); closeSheet(); closeConfirm(); renderAll();
   toast('已删除');
 }
-function closeConfirm(){ document.getElementById('confirmOverlay').classList.remove('show'); }
+function closeConfirm(){ closeOverlayEl('confirmOverlay'); }
 
 /* ============ 月份选择器 ============ */
 function todayYear(){ return new Date().getFullYear(); }
@@ -1186,9 +1254,9 @@ function openMonthPicker(){
   const [y] = viewMonth.split('-').map(Number);
   pickerYear = y;
   renderMonthGrid();
-  document.getElementById('monthOverlay').classList.add('show');
+  openOverlayEl('monthOverlay');
 }
-function closeMonthPicker(){ document.getElementById('monthOverlay').classList.remove('show'); }
+function closeMonthPicker(){ closeOverlayEl('monthOverlay'); }
 function renderMonthGrid(){
   document.getElementById('mpYear').textContent = pickerYear;
   const nowY = todayYear(), nowM = todayMonth();
@@ -1218,13 +1286,17 @@ function showProgress(title){
   document.getElementById('progFill').style.width = '0%';
   document.getElementById('progText').innerHTML = '<span class="p-spin"></span>请稍候，勿操作';
   document.getElementById('progressOverlay').classList.add('show');
+  lockBodyScroll(true);
 }
 function updateProgress(pct, text){
   document.getElementById('progFill').style.width = Math.max(0, Math.min(100, pct)) + '%';
   const t = document.getElementById('progText');
   t.innerHTML = text ? text : '请稍候，勿操作';
 }
-function hideProgress(){ document.getElementById('progressOverlay').classList.remove('show'); }
+function hideProgress(){
+  document.getElementById('progressOverlay').classList.remove('show');
+  if(!overlayStack.length) lockBodyScroll(false);
+}
 
 function importBill(){
   pickFile();
@@ -1352,9 +1424,9 @@ function showImportPreview(recs){
   document.getElementById('pvList').innerHTML = list +
     (recs.length>MAX?`<div class="pv-more">… 仅显示前 ${MAX} 条，共 ${recs.length} 条</div>`:'');
   document.getElementById('pvConfirm').textContent = `确认导入 ${recs.length} 条`;
-  document.getElementById('previewOverlay').classList.add('show');
+  openOverlayEl('previewOverlay');
 }
-function closePreview(){ document.getElementById('previewOverlay').classList.remove('show'); }
+function closePreview(){ closeOverlayEl('previewOverlay'); }
 function confirmImport(){
   const recs = pendingRecs;
   if(!recs || !recs.length){ closePreview(); return; }
@@ -1782,7 +1854,11 @@ function bind(){
   document.querySelectorAll('nav.tabs .tab').forEach(tab=>{
     tab.onclick = ()=>{
       currentTab = tab.dataset.tab;
-      document.querySelectorAll('nav.tabs .tab').forEach(t=>t.classList.toggle('active', t===tab));
+      document.querySelectorAll('nav.tabs .tab').forEach(t=>{
+        const on = t===tab;
+        t.classList.toggle('active', on);
+        if(on) t.setAttribute('aria-current','page'); else t.removeAttribute('aria-current');
+      });
       document.getElementById('panel-ledger').classList.toggle('active', currentTab==='ledger');
       document.getElementById('panel-stats').classList.toggle('active', currentTab==='stats');
       if(currentTab==='stats' && statsDirty){ renderStats(); statsDirty=false; }
