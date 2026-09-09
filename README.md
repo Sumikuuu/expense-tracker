@@ -2,6 +2,12 @@
 
 一个纯前端、零依赖的 PWA 记账工具。轻量月度流水记账与分类统计，**数据只保存在你自己的设备上，不上传任何服务器**。
 
+## 直接使用
+
+👉 **<https://sumikuuu.github.io/expense-tracker/>**
+
+打开就能用，不需要安装任何东西。手机上建议用浏览器的「添加到主屏」，这样会变成一个独立图标、可以离线使用的 App（iOS 上还能避免长期不打开被系统清理掉本地数据）。
+
 ## 功能
 
 - **记账**：支出 / 收入，9 个支出分类 + 4 个收入分类，5 个支付渠道，备注与日期
@@ -11,21 +17,23 @@
 - **备份**：全部账目导出为 JSON，可在另一台设备导入合并
 - **离线**：Service Worker 缓存，可安装到主屏（iOS / Android / 桌面）
 
-## 本地运行
+## 本地开发
 
-**必须通过 HTTP 服务访问，不要直接双击 `index.html`。** Service Worker 只在 `https://` 或 `localhost` 下生效，`file://` 下注册会静默失败（表现为没有离线缓存、无法安装）。
+**只在修改代码时才需要。** 项目没有构建步骤，起一个静态服务器即可：
 
 ```bash
-# 任选一种
-npx serve .
-python -m http.server 8080
+npx serve .        # 或者 python -m http.server 8080
 ```
 
 然后打开 <http://localhost:8080>。
 
+不要直接双击 `index.html` 用 `file://` 打开——Service Worker 只在 `https://` 或 `localhost` 下生效，`file://` 下注册会静默失败（没有离线缓存、无法安装）。
+
 ## 部署
 
-推送到 GitHub 后，在仓库 **Settings → Pages** 中选择 `main` 分支根目录。GitHub Pages 自带 HTTPS，PWA 的离线与安装能力才可用。
+已启用 **GitHub Pages**（`main` 分支根目录），所以：**推送到 `main` 就会自动重新部署**，等一两分钟刷新即可。不需要任何额外操作。
+
+Pages 自带 HTTPS，PWA 的离线与安装能力依赖这一点。
 
 ## 数据说明
 
