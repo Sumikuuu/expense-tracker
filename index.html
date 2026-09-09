@@ -537,6 +537,8 @@ const CHANNELS = [
   {name:'其他', emoji:'🏷️', color:'#adb5bd'},
 ];
 const STORE_KEY = 'expense-tracker-v1';
+// 去重索引：dupKey → Set，避免导入时对 data 反复全量扫描（O(N×M)）
+let dupIndex = null;
 const BUDGET_KEY = 'expense-budget-v1';
 
 let data = load();
@@ -592,7 +594,17 @@ function load(){
     return Array.isArray(arr) ? arr : [];
   }catch(e){ return []; }
 }
-function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
+function save(){
+  dupIndex = null;   // 数据已变更，去重索引失效，下次导入时重建
+  try{
+    localStorage.setItem(STORE_KEY, JSON.stringify(data));
+    return true;
+  }catch(e){
+    // 配额溢出等写入失败：明确提示，避免用户以为已经存好了
+    toast('保存失败：存储空间可能已满，请先导出备份');
+    return false;
+  }
+}
 
 function loadBudget(){
   try{
@@ -602,7 +614,10 @@ function loadBudget(){
     return {total: parseFloat(b.total)||0, cats: (b.cats && typeof b.cats==='object') ? b.cats : {} };
   }catch(e){ return {total:0, cats:{}}; }
 }
-function saveBudget(){ localStorage.setItem(BUDGET_KEY, JSON.stringify(budget)); }
+function saveBudget(){
+  try{ localStorage.setItem(BUDGET_KEY, JSON.stringify(budget)); }
+  catch(e){ toast('保存失败：存储空间可能已满'); }
+}
 function totalBudget(){ return parseFloat(budget.total)||0; }
 
 /* ============ 备份 / 导入 ============ */
@@ -631,6 +646,32 @@ function exportBackup(){
   closeBackup();
 }
 
+// 备份记录校验：字段非法或分类/渠道不在名单内的记录一律丢弃或回落，
+// 避免脏数据进入渲染流程（date 会被拼进 innerHTML，必须严格限定为 YYYY-MM-DD）
+function normalizeImportedRecord(r, isCents){
+  if(!r || typeof r !== 'object') return null;
+  const date = String(r.date == null ? '' : r.date).slice(0, 10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const [, dm, dd] = date.split('-').map(Number);
+  if(!(dm >= 1 && dm <= 12 && dd >= 1 && dd <= 31)) return null;   // 拒绝 2026-13-45 这类假日期
+  const type = r.type === 'income' ? 'income' : 'expense';
+  const amount = isCents ? Math.round(parseFloat(r.amount) || 0) : toCents(r.amount);
+  if(!(amount > 0)) return null;
+  const knownCat = CATEGORIES.some(c => c.name === r.category)
+    || INCOME_CATS.some(c => c.name === r.category);
+  const channel = CHANNELS.some(c => c.name === r.channel) ? r.channel : '其他';
+  return {
+    id: (typeof r.id === 'string' && r.id) ? r.id : genId(),
+    type: type,
+    amount: amount,
+    category: knownCat ? r.category : '其他',
+    note: String(r.note == null ? '' : r.note).slice(0, 60),
+    date: date,
+    channel: channel,
+    updatedAt: Number(r.updatedAt) || Date.now()
+  };
+}
+
 // 恢复：读取备份 JSON，按 id 去重合并到当前数据（供统一导入入口调用）
 function restoreBackupText(text){
   try{
@@ -639,24 +680,29 @@ function restoreBackupText(text){
     if(!Array.isArray(arr)){ toast('备份文件格式不正确'); return; }
     // 老版本导出金额以「元」存储，转成「分」保持一致（v2 / unit=cents 的备份已是分）
     const isCents = !!(obj && (obj.unit==='cents' || ((obj.version||0)>=2)));
-    let added = 0, skipped = 0;
-    arr.forEach(r => {
-      if(!r || !r.id){ return; }
-      const rec = isCents ? r : Object.assign({}, r, {amount: toCents(r.amount)});
+    let added = 0, skipped = 0, invalid = 0;
+    arr.forEach(raw => {
+      const rec = normalizeImportedRecord(raw, isCents);
+      if(!rec){ invalid++; return; }
       const dup = data.some(t => t.id===rec.id) || isDup(rec);
       if(dup){ skipped++; }
-      else { data.push(rec); added++; }
+      else { data.push(rec); markDup(rec); added++; }
     });
-    // 同步预算
+    // 同步预算（同样做数值与分类名校验）
     if(obj && obj.budget && typeof obj.budget==='object'){
-      budget = { total: isCents ? (parseInt(obj.budget.total)||0) : toCents(obj.budget.total),
-                 cats: (obj.budget.cats||{}) };
-      if(!isCents){ Object.keys(budget.cats).forEach(k => { budget.cats[k] = toCents(budget.cats[k]); }); }
+      const rawCats = (obj.budget.cats && typeof obj.budget.cats==='object') ? obj.budget.cats : {};
+      const cats = {};
+      Object.keys(rawCats).forEach(k => {
+        const v = isCents ? Math.round(parseFloat(rawCats[k])||0) : toCents(rawCats[k]);
+        if(v > 0) cats[k] = v;
+      });
+      const rawTotal = isCents ? Math.round(parseFloat(obj.budget.total)||0) : toCents(obj.budget.total);
+      budget = { total: rawTotal > 0 ? rawTotal : 0, cats: cats };
       saveBudget();
     }
     save();
     renderAll();
-    toast(`导入完成：新增 ${added} 条，跳过 ${skipped} 条重复`);
+    toast(`导入完成：新增 ${added} 条，跳过重复 ${skipped} 条${invalid?`，忽略无效 ${invalid} 条`:''}`);
   }catch(err){
     toast('导入失败：文件解析出错');
   }
@@ -742,6 +788,7 @@ function renderHeader(){
 function renderCatFilter(){
   const el = document.getElementById('catFilter');
   if(!el) return;
+  const keepLeft = el.scrollLeft;   // 重建 DOM 会重置横向滚动，先记住再还原
   // label=显示文本；name=筛选键（'' 表示全部，不能改成"全部"否则筛选逻辑失效）
   const cats = [{name:'', label:'📋 全部', color:null}]
     .concat(CATEGORIES)
@@ -761,6 +808,7 @@ function renderCatFilter(){
       renderLedger();
     };
   });
+  el.scrollLeft = keepLeft;
 }
 
 function renderLedger(){
@@ -782,7 +830,7 @@ function renderLedger(){
     const g = groups[date];
     const exp = sum(g,'expense');
     html += '<div class="date-group">';
-    html += `<div class="date-head"><span>${date}</span><span class="g-total">支出 ${fmt(exp)}</span></div>`;
+    html += `<div class="date-head"><span>${esc(date)}</span><span class="g-total">支出 ${fmt(exp)}</span></div>`;
     g.forEach(t => {
       const c = catName(t.category);
       const ch = channelName(t.channel);
@@ -1076,7 +1124,7 @@ function toast(msg){
 function saveEntry(){
   const amount = toCents(document.getElementById('amount').value);
   if(amount<=0){ toast('请输入有效金额'); return; }
-  const cat = (document.querySelector('#catGrid .c.sel')||{}).dataset && document.querySelector('#catGrid .c.sel').dataset.name;
+  const cat = document.querySelector('#catGrid .c.sel')?.dataset?.name || '其他';
   const note = document.getElementById('note').value.trim();
   const date = document.getElementById('date').value || todayStr();
   const entry = { id: editingId || Date.now().toString(36)+Math.random().toString(36).slice(2,5),
@@ -1287,7 +1335,6 @@ function confirmImport(){
 }
 // 分帧批量写入（预览确认后调用）
 function writeRecs(recs){
-  const before = data.length;
   let added = 0, skipped = 0, i = 0;
   const total = recs.length;
   showProgress('正在导入…');
@@ -1298,14 +1345,14 @@ function writeRecs(recs){
       const r = recs[i];
       if(!r) continue;
       if(isDup(r)){ skipped++; }
-      else { data.push(r); added++; }
+      else { data.push(r); markDup(r); added++; }
     }
     updateProgress(Math.round(i/total*100), `正在写入 ${i}/${total} 条…`);
     if(i < total){
       setTimeout(step, 0);   // 让出主线程，进度条可见、界面不卡
     } else {
       save(); renderAll(); hideProgress();
-      toast(`导入成功 ${added} 条${before?`，已跳过重复 ${skipped} 条`:''}`);
+      toast(`导入成功 ${added} 条${skipped?`，已跳过重复 ${skipped} 条`:''}`);
       showContinueImport();   // 提示"再导一份"（如微信/支付宝第二份账单）
     }
   }
@@ -1574,18 +1621,33 @@ function mapAlipayCat(c){
 }
 
 function toRows(text){
-  const lines = text.split(/\r?\n/);
-  return lines.map(l => {
-    // 粗暴 CSV 分列（支持引号包裹的逗号）
-    const out = []; let cur=''; let inQ=false;
-    for(const ch of l){
-      if(ch===','){ if(inQ){ cur+=ch; } else { out.push(cur.trim()); cur=''; } }
-      else if(ch==='"'){ inQ = !inQ; }
-      else { cur+=ch; }
+  // 单遍字符扫描：引号内不切行、不切列，支持 "" 转义，
+  // 因此备注里带换行/逗号的账单也不会断行丢记录
+  const rows = [];
+  let row = [], cur = '', inQ = false, i = 0;
+  const pushCell = () => { row.push(cur.trim()); cur = ''; };
+  const pushRow = () => {
+    pushCell();
+    if(row.some(c => c !== '')) rows.push(row);   // 整行空则丢弃
+    row = [];
+  };
+  while(i < text.length){
+    const ch = text[i];
+    if(inQ){
+      if(ch === '"'){
+        if(text[i+1] === '"'){ cur += '"'; i += 2; continue; }   // "" → 一个引号
+        inQ = false; i++; continue;
+      }
+      cur += ch; i++; continue;
     }
-    if(cur.trim()!=='') out.push(cur.trim());
-    return out;
-  }).filter(r => r.length);
+    if(ch === '"'){ inQ = true; i++; continue; }
+    if(ch === ','){ pushCell(); i++; continue; }
+    if(ch === '\r'){ i++; continue; }
+    if(ch === '\n'){ pushRow(); i++; continue; }
+    cur += ch; i++;
+  }
+  pushRow();   // 收尾最后一行
+  return rows;
 }
 
 // 关键词 → 分类（传入的 s 已合并 交易对方+商品+备注）
@@ -1595,24 +1657,25 @@ function guessCat(type, s){
     if(/工资|薪|薪资/.test(s)) return '工资';
     if(/红包|奖|兼|结款|生意|收钱码|收款/.test(s)) return '奖金';
     if(/转账/.test(s)) return '其他';
-    return '工资';
+    return '其他';   // 无法判断的收入归入「其他」，不再默认成工资
   }
   // 通讯：话费/流量/宽带（必须先于“居住”）
   if(/话费|流量|宽带|中国电信|中国移动|中国联通|电信充值|移动充值|联通充值|充话|手机费|通讯/.test(s)) return '通讯';
   // 其他：转账/AA/请客/红包人情（微信转账给朋友等，并入其他）
   if(/转账|AA|请客|红包|人情|喝喜酒|随礼|份子/.test(s)) return '其他';
-  // 餐饮：奶茶/咖啡/外卖/快餐/茶饮/便利店零食
-  if(/餐|饭|美团|饿了么|外卖|奶茶|咖啡|火锅|烧烤|食堂|瑞幸|麦当劳|肯德基|食|茶|冰城|蜜雪|饮料|饮品|面包|甜|小吃|面|粉|汉堡|奈雪|喜茶|古茗|7-ELEVEN|美宜佳|便利店|鲜果|果饮/.test(s)) return '餐饮';
+  // 餐饮：奶茶/咖啡/外卖/快餐/茶饮/便利店零食（「面」「粉」过宽会误吞“面试”，改为词组）
+  if(/餐|饭|美团|饿了么|外卖|奶茶|咖啡|火锅|烧烤|食堂|瑞幸|麦当劳|肯德基|食|茶|冰城|蜜雪|饮料|饮品|面包|甜|小吃|面条|拉面|面馆|米粉|螺蛳粉|汉堡|奈雪|喜茶|古茗|7-ELEVEN|美宜佳|便利店|鲜果|果饮/.test(s)) return '餐饮';
   // 交通：地铁/打车/骑行/加油/停车/出行
   if(/地铁|公交|滴滴|打车|快车|出租|高铁|火车|机票|航空|加油|停车|单车|哈啰|骑行|出行|先骑后付|先乘车后付款|自动充值|掌上高铁|12306|联运/.test(s)) return '交通';
   // 娱乐：电影/游戏/游戏币/月卡/门票/订阅类（iCloud/会员/订阅等固定扣费）
   if(/电影|影院|游戏|Steam|Valve|库洛|KTV|唱吧|视频|音乐|娱乐|景区|门票|展览|月相|观察卡|金币|通行证|观影|寰宇|账号|月卡|档|游|订阅|连续包月|自动续费|月费|iCloud|App Store|Apple|Netflix|Spotify|YouTube|会员|VIP|云服务|Monthly/.test(s)) return '娱乐';
-  // 学习：学费/学校缴费/课程/资料
-  if(/书|课程|学费|培训|学习|考试|文具|教育|网课|资料|大学|学校|缴费|平台缴费/.test(s)) return '学习';
+  // 居住：房租/水电/物业/宽带/快递/寄件（必须排在「学习」之前：
+  // 否则“水费缴费”“物业缴费”会被学习里的缴费类关键词抢走）
+  if(/房租|水电|水费|电费|水电气|物业|燃气|取暖|宽带|快递|顺丰|寄件|邮费|居住|房/.test(s)) return '居住';
+  // 学习：学费/报名费/课程/资料（不再用宽泛的“缴费”，避免吞掉水电燃气）
+  if(/书|课程|学费|报名费|培训|学习|考试|文具|教育|网课|资料|大学|学校|平台缴费/.test(s)) return '学习';
   // 医疗：医院/药店/医保/体检
   if(/药|医院|挂号|诊所|体检|医疗|健康|医保|就医/.test(s)) return '医疗';
-  // 居住：房租/水电/物业/宽带/快递/寄件
-  if(/房租|水电|物业|燃气|宽带|快递|顺丰|寄件|邮费|居住|房/.test(s)) return '居住';
   // 购物：电商/百货/数码/服饰/超市/配件硬件
   if(/购物|淘宝|天猫|京东|拼多多|超市|商场|专卖|服饰|衣|鞋|裤|帽|百货|大润发|鼠标|键盘|耳机|键帽|手机|数码|充电|支架|改装|电竞|鼠标垫|钢化|机箱|星闪|水滴|发热/.test(s)) return '购物';
   return '其他';
@@ -1630,9 +1693,16 @@ function guessChannel(pay, desc, party){
 }
 
 function genId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
-function isDup(r){
-  return data.some(t => t.date===r.date && t.type===r.type && t.amount===r.amount && t.category===r.category && t.note===r.note);
+function dupKey(r){
+  return [r.date||'', r.type||'', r.amount||0, r.category||'', r.note||''].join('\u0001');
 }
+function buildDupIndex(){ dupIndex = new Set(data.map(dupKey)); }
+function isDup(r){
+  if(!dupIndex) buildDupIndex();
+  return dupIndex.has(dupKey(r));
+}
+// 记录被写入 data 后同步登记，保证同一文件内部的重复也能识别
+function markDup(r){ if(dupIndex) dupIndex.add(dupKey(r)); }
 
 /* ============ 渲染总调度 ============ */
 function renderAll(){
