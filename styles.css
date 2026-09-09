@@ -241,11 +241,6 @@ canvas#trend{width:100%;height:auto;aspect-ratio:640/220;}
 .cat-grid .c.sel .n{color:var(--c);font-weight:600;}
 .cat-grid .c.sel .e{transform:scale(1.12);}
 
-.rowlab{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:14px;color:var(--ink-2);}
-.rowlab input,.rowlab select{
-  flex:1;border:1px solid #dfe4ec;background:#fff;border-radius:10px;padding:10px 12px;
-  font-size:16px;color:var(--ink);outline:none;
-}
 .field{margin-top:12px;font-size:13px;color:var(--ink-2);}
 .field input{width:100%;border:1px solid #dfe4ec;background:#fff;border-radius:10px;
   padding:11px 12px;font-size:16px;outline:none;margin-top:6px;}

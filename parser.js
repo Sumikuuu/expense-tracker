@@ -484,18 +484,20 @@ function normalizeImportedRecord(r, isCents){
   };
 }
 
-/* ===== 对外导出 ===== */
+/* ===== 对外导出 =====
+ * 只导出真正被 app.js 或测试用到的名字；模块内部的辅助函数（genId / cleanVal /
+ * sheetToCsv / parseSS / cellType）不导出，避免接口越来越大。
+ */
 return {
   CATEGORIES: CATEGORIES, CHANNELS: CHANNELS, INCOME_CATS: INCOME_CATS,
   toCents: toCents, fmt: fmt, fmtSci: fmtSci, esc: esc,
-  catName: catName, channelName: channelName, genId: genId, cleanVal: cleanVal,
+  catName: catName, channelName: channelName,
   toRows: toRows, parseBill: parseBill, guessCat: guessCat,
   mapAlipayCat: mapAlipayCat, guessChannel: guessChannel,
   dupKey: dupKey, normalizeImportedRecord: normalizeImportedRecord,
   parseXlsxText: parseXlsxText,
-  // 以下主要供测试与内部复用
+  // 以下主要供测试使用
   excelDateToStr: excelDateToStr, colLetterToNum: colLetterToNum,
-  normalizeCell: normalizeCell, xmlUnescape: xmlUnescape,
-  sheetToCsv: sheetToCsv, parseSS: parseSS, cellType: cellType, unzip: unzip
+  normalizeCell: normalizeCell, xmlUnescape: xmlUnescape, unzip: unzip
 };
 });
