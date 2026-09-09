@@ -12,6 +12,11 @@
 const {
   CATEGORIES, CHANNELS, INCOME_CATS, toCents, fmt, fmtSci, esc, catName, channelName, parseXlsxText, parseBill, dupKey, normalizeImportedRecord
 } = window.ExpenseParser;
+
+/* ===== DOM 查询简写 ===== */
+const $  = id => document.getElementById(id);              // 按 id
+const $$ = sel => document.querySelectorAll(sel);          // 按选择器（返回 NodeList）
+
 const STORE_KEY = 'expense-tracker-v1';
 // 去重索引：dupKey → Set，避免导入时对 data 反复全量扫描（O(N×M)）
 let dupIndex = null;
@@ -101,7 +106,7 @@ const overlayStack = [];                  // 已打开的遮罩 id，后进先�
 const overlayReturnFocus = new Map();     // 每个遮罩打开前的焦点位置
 function lockBodyScroll(lock){ document.body.style.overflow = lock ? 'hidden' : ''; }
 function openOverlayEl(id){
-  const el = document.getElementById(id);
+  const el = $(id);
   if(!el || el.classList.contains('show')) return;
   overlayReturnFocus.set(id, document.activeElement);
   el.classList.add('show');
@@ -112,7 +117,7 @@ function openOverlayEl(id){
   if(sheet) sheet.focus();
 }
 function closeOverlayEl(id){
-  const el = document.getElementById(id);
+  const el = $(id);
   if(!el) return;
   el.classList.remove('show');
   const i = overlayStack.indexOf(id);
@@ -132,7 +137,7 @@ const OVERLAY_CLOSERS = {
 document.addEventListener('keydown', e => {
   if(!overlayStack.length) return;
   const topId = overlayStack[overlayStack.length - 1];
-  const el = document.getElementById(topId);
+  const el = $(topId);
   if(!el) return;
   if(e.key === 'Escape'){                       // Esc 关闭最上层弹窗
     if(OVERLAY_CLOSERS[topId]){ OVERLAY_CLOSERS[topId](); e.preventDefault(); }
@@ -231,18 +236,18 @@ function sum(list, type){
 function renderHeader(){
   const [y,m] = viewMonth.split('-').map(Number);
   const label = (y===new Date().getFullYear() && m===new Date().getMonth()+1) ? '本月' : (y+'年'+m+'月');
-  document.getElementById('monthLabel').textContent = label;
+  $('monthLabel').textContent = label;
   const list = monthTransactions(viewMonth);
   const exp = sum(list,'expense');
-  document.getElementById('totalExpense').textContent = '¥' + fmt(exp);
+  $('totalExpense').textContent = '¥' + fmt(exp);
   const inc = sum(list,'income');
-  document.getElementById('monthSub').textContent = '收入 ¥' + fmt(inc) + '　·　' + list.length + ' 笔';
+  $('monthSub').textContent = '收入 ¥' + fmt(inc) + '　·　' + list.length + ' 笔';
 
   // 本月预算进度
   const tb = totalBudget();
-  const track = document.getElementById('budgetTrack');
-  const fill = document.getElementById('budgetFill');
-  const line = document.getElementById('budgetLine');
+  const track = $('budgetTrack');
+  const fill = $('budgetFill');
+  const line = $('budgetLine');
   if(tb>0){
     track.style.display='block';
     const pct = Math.min(exp/tb*100, 100);
@@ -267,7 +272,7 @@ function renderHeader(){
 /* ============ 记账列表 ============ */
 // 分类筛选条（顶部横滑胶囊：全部 + 支出分类 + 收入分类去重）
 function renderCatFilter(){
-  const el = document.getElementById('catFilter');
+  const el = $('catFilter');
   if(!el) return;
   const keepLeft = el.scrollLeft;   // 重建 DOM 会重置横向滚动，先记住再还原
   // label=显示文本；name=筛选键（'' 表示全部，不能改成"全部"否则筛选逻辑失效）
@@ -282,13 +287,7 @@ function renderCatFilter(){
     return `<button type="button" class="cf${sel?' sel':''}" data-cat="${esc(c.name)}"
       style="${sel?`--c:${col};--cgbg:${bg};`:''}">${esc(label)}</button>`;
   }).join('');
-  el.querySelectorAll('.cf').forEach(chip => {
-    chip.onclick = () => {
-      viewCat = chip.dataset.cat;
-      renderCatFilter();
-      renderLedger();
-    };
-  });
+  // 点击事件用委托方式在 bind() 里统一绑定一次，这里不再逐个绑（避免每次重绘都重新绑）
   el.scrollLeft = keepLeft;
 }
 
@@ -296,7 +295,7 @@ function renderLedger(){
   const all = monthTransactions(viewMonth).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
   // 按分类名筛选（任意支出/收入的记录匹配即显示）
   const list = viewCat ? all.filter(t => t.category===viewCat) : all;
-  const wrap = document.getElementById('ledgerList');
+  const wrap = $('ledgerList');
   if(list.length===0){
     wrap.innerHTML = viewCat
       ? `<div class="empty"><div class="big">🍃</div>本月「${esc(viewCat)}」还没有记录</div>`
@@ -341,9 +340,9 @@ function renderStats(){
   const list = monthTransactions(viewMonth);
   const exp = sum(list,'expense');
   const inc = sum(list,'income');
-  document.getElementById('stExpense').textContent = '¥' + fmtSci(exp);
-  document.getElementById('stIncome').textContent = '¥' + fmtSci(inc);
-  document.getElementById('stBalance').textContent = '¥' + fmtSci(inc-exp);
+  $('stExpense').textContent = '¥' + fmtSci(exp);
+  $('stIncome').textContent = '¥' + fmtSci(inc);
+  $('stBalance').textContent = '¥' + fmtSci(inc-exp);
 
   // 分类统计
   const expList = list.filter(t=>t.type==='expense');
@@ -354,7 +353,7 @@ function renderStats(){
   drawDonut(sorted, exp);
   renderLegend(sorted, exp);
   renderChannelStats(list, exp);
-  renderBudgetEditor(list, exp);
+  renderBudgetEditor(list);
   renderTrend();
 }
 
@@ -363,8 +362,8 @@ function renderChannelStats(list, exp){
   const byCh = {};
   expList.forEach(t => { const ch = t.channel || '其他'; byCh[ch] = (byCh[ch]||0) + (parseFloat(t.amount)||0); });
   const sorted = Object.keys(byCh).sort((a,b)=>byCh[b]-byCh[a]).map(name=>({name:(channelName(name).name), value:byCh[name]}));
-  const el = document.getElementById('chanList');
-  const sumEl = document.getElementById('chanSum');
+  const el = $('chanList');
+  const sumEl = $('chanSum');
   if(sorted.length===0){ el.innerHTML=''; sumEl.innerHTML=''; return; }
   el.innerHTML = sorted.map(item => {
     const ch = channelName(item.name);
@@ -380,14 +379,14 @@ function renderChannelStats(list, exp){
 }
 
 /* 预算编辑器 + 趋势图 */
-function renderBudgetEditor(list, exp){
-  const totalIn = document.getElementById('budgetTotal');
+function renderBudgetEditor(list){
+  const totalIn = $('budgetTotal');
   // 只在容器隐藏/未聚焦时刷新数值，避免打字被覆盖
   if(document.activeElement !== totalIn){
     totalIn.value = totalBudget()>0 ? (totalBudget()/100) : '';
   }
   // 分类预算行
-  const wrap = document.getElementById('budgetCats');
+  const wrap = $('budgetCats');
   wrap.innerHTML = CATEGORIES.map(c => {
     const used = list.filter(t=>t.type==='expense' && t.category===c.name)
       .reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
@@ -401,25 +400,12 @@ function renderBudgetEditor(list, exp){
       <span class="bc-used" style="color:${over?'var(--expense)':'var(--ink-3)'}">${fmtSci(used)}</span>
     </div>`;
   }).join('');
-  // 分类预算输入改变（一次性代理事件，挂在外层容器上）
-  wrap.oninput = (e)=>{
-    const inp = e.target.closest('.bc-in');
-    if(!inp) return;
-    const name = inp.dataset.cat;
-    const v = parseFloat(inp.value);
-    const cents = toCents(v);
-    if(cents>0) budget.cats[name]=cents; else delete budget.cats[name];
-    saveBudget();
-    const used = list.filter(t=>t.type==='expense' && t.category===name).reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
-    if(cents>0 && used>cents){ inp.style.color='var(--expense)'; inp.style.fontWeight='700'; inp.style.borderBottomColor='var(--expense)'; }
-    else { inp.style.color='var(--ink)'; inp.style.fontWeight='400'; inp.style.borderBottomColor='#d5dbe6'; }
-    renderHeader();
-  };
+  // 分类预算的输入事件同样用委托，在 bind() 里绑定一次
 }
 
 /* 近6个月支出柱状趋势（高清DPR） */
 function renderTrend(){
-  const canvas = document.getElementById('trend');
+  const canvas = $('trend');
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const W = 640, H = 220;
@@ -480,7 +466,7 @@ function roundRect(ctx,x,y,w,h,r){
 }
 
 function drawDonut(sorted, total){
-  const canvas = document.getElementById('donut');
+  const canvas = $('donut');
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const cssSize = Math.min(canvas.getBoundingClientRect().width || 250, 250);
@@ -515,7 +501,7 @@ function drawDonut(sorted, total){
 }
 
 function renderLegend(sorted, total){
-  const el = document.getElementById('legendList');
+  const el = $('legendList');
   if(sorted.length===0){ el.innerHTML=''; return; }
   el.innerHTML = sorted.map(item => {
     const c = catName(item.name);
@@ -530,7 +516,7 @@ function renderLegend(sorted, total){
 }
 
 /* ============ 添加/编辑 弹窗 ============ */
-const overlay = document.getElementById('overlay');
+const overlay = $('overlay');
 let formType = 'expense';
 let formChannel = '其他';
 
@@ -539,11 +525,11 @@ function openSheet(id){
   setType(id ? (data.find(t=>t.id===id).type) : 'expense');
   setCat(id ? data.find(t=>t.id===id).category : '餐饮');
   formChannel = id ? (data.find(t=>t.id===id).channel || '其他') : '其他';
-  document.getElementById('amount').value = id ? (data.find(t=>t.id===id).amount/100) : '';
-  document.getElementById('note').value = id ? (data.find(t=>t.id===id).note||'') : '';
-  document.getElementById('date').value = id ? data.find(t=>t.id===id).date : todayStr();
-  document.getElementById('sheetTitle').textContent = id ? '编辑' : (formType==='expense'?'记一笔支出':'记一笔收入');
-  document.getElementById('delBtn').style.display = id ? 'block':'none';
+  $('amount').value = id ? (data.find(t=>t.id===id).amount/100) : '';
+  $('note').value = id ? (data.find(t=>t.id===id).note||'') : '';
+  $('date').value = id ? data.find(t=>t.id===id).date : todayStr();
+  $('sheetTitle').textContent = id ? '编辑' : (formType==='expense'?'记一笔支出':'记一笔收入');
+  $('delBtn').style.display = id ? 'block':'none';
   renderChannelGrid();
   setChannel(formChannel);
   openOverlayEl('overlay');
@@ -559,49 +545,45 @@ function setType(type){
   });
   // 收入也给几个分类
   const cats = type==='expense' ? CATEGORIES : INCOME_CATS;
-  const grid = document.getElementById('catGrid');
+  const grid = $('catGrid');
   grid.innerHTML = cats.map(c=>`<button type="button" class="c" data-name="${c.name}"
      style="--c:${c.color};--cgbg:${hexA(c.color,.14)}"><span class="e">${c.emoji}</span><span class="n">${c.name}</span></button>`).join('');
-  grid.querySelectorAll('.c').forEach(el=>{
-    el.addEventListener('click', ()=>{ setCat(el.dataset.name); });
-  });
+  // 点击由 bind() 里的委托处理
   if(formType==='expense') setCat('餐饮');
   else setCat(INCOME_CATS[0] ? INCOME_CATS[0].name : '其他');
-  document.getElementById('sheetTitle').textContent = editingId ? '编辑' : (type==='expense'?'记一笔支出':'记一笔收入');
+  $('sheetTitle').textContent = editingId ? '编辑' : (type==='expense'?'记一笔支出':'记一笔收入');
 }
 function setCat(name){
-  document.querySelectorAll('#catGrid .c').forEach(el=>{
+  $$('#catGrid .c').forEach(el=>{
     el.classList.toggle('sel', el.dataset.name===name);
   });
 }
 
 function renderChannelGrid(){
-  const grid = document.getElementById('chanGrid');
+  const grid = $('chanGrid');
   grid.innerHTML = CHANNELS.map(c=>`<button type="button" class="ch" data-name="${c.name}"
     style="--c:${c.color};--cgbg:${hexA(c.color,.14)}"><span class="e">${c.emoji}</span><span class="n">${c.name}</span></button>`).join('');
-  grid.querySelectorAll('.ch').forEach(el=>{
-    el.addEventListener('click', ()=>{ setChannel(el.dataset.name); });
-  });
+  // 点击由 bind() 里的委托处理
 }
 function setChannel(name){
   formChannel = name;
-  document.querySelectorAll('#chanGrid .ch').forEach(el=>{
+  $$('#chanGrid .ch').forEach(el=>{
     el.classList.toggle('sel', el.dataset.name===name);
   });
 }
 
 function toast(msg){
-  const t = document.getElementById('toast');
+  const t = $('toast');
   t.textContent = msg; t.classList.add('show');
   clearTimeout(t._t); t._t = setTimeout(()=>t.classList.remove('show'),1600);
 }
 
 function saveEntry(){
-  const amount = toCents(document.getElementById('amount').value);
+  const amount = toCents($('amount').value);
   if(amount<=0){ toast('请输入有效金额'); return; }
   const cat = document.querySelector('#catGrid .c.sel')?.dataset?.name || '其他';
-  const note = document.getElementById('note').value.trim();
-  const date = document.getElementById('date').value || todayStr();
+  const note = $('note').value.trim();
+  const date = $('date').value || todayStr();
   const entry = { id: editingId || Date.now().toString(36)+Math.random().toString(36).slice(2,5),
     type: formType, amount, category: cat, note, date, channel: formChannel, updatedAt: Date.now() };
   if(editingId){
@@ -637,10 +619,10 @@ function openMonthPicker(){
 }
 function closeMonthPicker(){ closeOverlayEl('monthOverlay'); }
 function renderMonthGrid(){
-  document.getElementById('mpYear').textContent = pickerYear;
+  $('mpYear').textContent = pickerYear;
   const nowY = todayYear(), nowM = todayMonth();
   const [vy, vm] = viewMonth.split('-').map(Number);
-  const grid = document.getElementById('monthGrid');
+  const grid = $('monthGrid');
   grid.innerHTML = '';
   for(let mo=1; mo<=12; mo++){
     const b = document.createElement('button');
@@ -649,11 +631,7 @@ function renderMonthGrid(){
       + (vy===pickerYear && vm===mo ? ' sel' : '')
       + (nowY===pickerYear && nowM===mo ? ' isNow' : '');
     b.textContent = mo + '月';
-    b.onclick = ()=>{
-      viewMonth = pickerYear + '-' + String(mo).padStart(2,'0');
-      closeMonthPicker();
-      renderAll();
-    };
+    b.dataset.mo = mo;                 // 点击逻辑由 bind() 里的委托处理
     grid.appendChild(b);
   }
 }
@@ -661,25 +639,62 @@ function renderMonthGrid(){
 /* ============ 账单导入 ============ */
 // 进度遮罩控制
 function showProgress(title){
-  document.getElementById('progTitle').textContent = title;
-  document.getElementById('progFill').style.width = '0%';
-  document.getElementById('progText').innerHTML = '<span class="p-spin"></span>请稍候，勿操作';
-  document.getElementById('progressOverlay').classList.add('show');
+  $('progTitle').textContent = title;
+  $('progFill').style.width = '0%';
+  $('progText').innerHTML = '<span class="p-spin"></span>请稍候，勿操作';
+  $('progressOverlay').classList.add('show');
   lockBodyScroll(true);
 }
 function updateProgress(pct, text){
-  document.getElementById('progFill').style.width = Math.max(0, Math.min(100, pct)) + '%';
-  const t = document.getElementById('progText');
+  $('progFill').style.width = Math.max(0, Math.min(100, pct)) + '%';
+  const t = $('progText');
   t.innerHTML = text ? text : '请稍候，勿操作';
 }
 function hideProgress(){
-  document.getElementById('progressOverlay').classList.remove('show');
+  $('progressOverlay').classList.remove('show');
   if(!overlayStack.length) lockBodyScroll(false);
 }
 
 function importBill(){
   pickFile();
 }
+
+/* ---------- 文件读取工具（把回调式的 FileReader 包成 Promise） ---------- */
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+// 读取文件为 ArrayBuffer；带 20 秒超时与中断兜底，失败时抛出可展示的错误信息
+function readAsArrayBuffer(file, timeoutMs){
+  return new Promise((resolve, reject) => {
+    const rd = new FileReader();
+    let timer = null;
+    const fail = msg => { if(timer) clearTimeout(timer); reject(new Error(msg)); };
+    timer = setTimeout(() => {
+      try{ rd.abort(); }catch(e){}
+      fail('读取超时：文件可能未下载完毕，请下载到本地后重试');
+    }, timeoutMs || 20000);
+    rd.addEventListener('load', () => { clearTimeout(timer); resolve(rd.result); });
+    rd.addEventListener('error', () => fail('文件读取失败，请重试（iCloud 文件请先下载到手机本地）'));
+    rd.addEventListener('abort', () => fail('读取被中断，请重新选择文件'));
+    rd.readAsArrayBuffer(file);
+  });
+}
+function readAsText(file){
+  return new Promise((resolve, reject) => {
+    const rd = new FileReader();
+    rd.addEventListener('load', () => resolve(rd.result));
+    rd.addEventListener('error', () => reject(new Error('备份文件读取失败，请重试')));
+    rd.readAsText(file, 'utf-8');
+  });
+}
+// 账单文本编码探测：微信/支付宝账单多为 GBK，utf-8 解码出现替换符(�)或没有中文时改用 GBK
+function decodeBillText(buf){
+  let text = new TextDecoder('utf-8').decode(buf);
+  if(text.includes('\uFFFD') || !/[\u4e00-\u9fa5]/.test(text)){
+    try{ text = new TextDecoder('gbk').decode(buf); }catch(e){}
+  }
+  return text;
+}
+
 // 打开文件选择并处理（可重复调用，支持"再导一份"）
 function pickFile(){
   const input = document.createElement('input');
@@ -694,70 +709,47 @@ function pickFile(){
   const cleanup = () => {
     setTimeout(()=>{ if(input.parentNode) input.parentNode.removeChild(input); }, 50);
   };
-  input.onchange = () => {
+  input.addEventListener('change', async () => {
     if(done) return; done = true;
     const f = input.files[0];
     if(!f){ cleanup(); return; }
     const fname = (f.name||'').toLowerCase();
-    // 统一入口自动分流：.json 备份恢复；否则按账单解析
-    if(/\.json$/.test(fname)){
-      const rd = new FileReader();
-      rd.onload = () => {
+    try{
+      // 统一入口自动分流：.json 备份恢复；否则按账单解析
+      if(/\.json$/.test(fname)){
+        const text = await readAsText(f);
         cleanup();
-        restoreBackupText(rd.result);
+        restoreBackupText(text);
         closeBackup();
-      };
-      rd.onerror = () => { cleanup(); toast('备份文件读取失败，请重试'); };
-      rd.readAsText(f, 'utf-8');
-      return;
-    }
-    // 明确不支持旧版二进制 .xls，给提示而不是静默失败
-    if(/\.xls$|application\/vnd\.ms-excel/i.test(f.name + (f.type||''))){
-      cleanup();
-      toast('暂不支持旧版 .xls 表格，请导出为 .xlsx 或 CSV');
-      return;
-    }
-    const isXlsx = /\.xlsx$|application\/vnd\.openxmlformats|officeDocument/i.test(f.name + (f.type||''));
-    showProgress('正在读取账单…');
-    setTimeout(() => {
-      const rd = new FileReader();
-      // 读取失败/中断兜底：明确提示，别让界面"卡住没反应"
-      const readFailed = (msg) => {
-        clearTimeout(readTimer);
-        hideProgress(); cleanup();
-        toast(msg || '文件读取失败，请重试（iCloud 文件请先下载到手机本地）');
-      };
-      const readTimer = setTimeout(()=>{
-        readFailed('读取超时：文件可能未下载完毕，请下载到本地后重试');
-      }, 20000);
-      rd.onload = () => {
-        clearTimeout(readTimer);
+        return;
+      }
+      // 明确不支持旧版二进制 .xls，给提示而不是静默失败
+      if(/\.xls$|application\/vnd\.ms-excel/i.test(f.name + (f.type||''))){
         cleanup();
-        const buf = rd.result; // ArrayBuffer
-        let text;
-        if(isXlsx){
-          updateProgress(0, '正在解析 Excel…');
-          // 让出主线程，保证进度条先绘制
-          setTimeout(() => {
-            try{ text = parseXlsxText(buf); }
-            catch(e){ text = null; }
-            if(text===null){ hideProgress(); toast('无法读取该 Excel 文件'); return; }
-            mergeAndFinish(text);
-          }, 30);
-        } else {
-          text = new TextDecoder('utf-8').decode(buf);
-          // 微信/支付宝账单多为 GBK 编码。utf-8 解码若出现替换符(�)即说明编码不匹配，改用 GBK
-          if (text.includes('\uFFFD') || !/[\u4e00-\u9fa5]/.test(text)) {
-            try { text = new TextDecoder('gbk').decode(buf); } catch(e){}
-          }
-          mergeAndFinish(text);
-        }
-      };
-      rd.onerror = () => readFailed('文件读取失败，请重试');
-      rd.onabort = () => readFailed('读取被中断，请重新选择文件');
-      rd.readAsArrayBuffer(f);
-    }, 30);
-  };
+        toast('暂不支持旧版 .xls 表格，请导出为 .xlsx 或 CSV');
+        return;
+      }
+      const isXlsx = /\.xlsx$|application\/vnd\.openxmlformats|officeDocument/i.test(f.name + (f.type||''));
+      showProgress('正在读取账单…');
+      await sleep(30);                       // 让出主线程，保证进度条先绘制
+      const buf = await readAsArrayBuffer(f);
+      cleanup();
+      let text;
+      if(isXlsx){
+        updateProgress(0, '正在解析 Excel…');
+        await sleep(30);
+        try{ text = parseXlsxText(buf); }
+        catch(e){ text = null; }
+        if(text === null){ hideProgress(); toast('无法读取该 Excel 文件'); return; }
+      } else {
+        text = decodeBillText(buf);
+      }
+      mergeAndFinish(text);
+    }catch(err){
+      hideProgress(); cleanup();
+      toast(err && err.message ? err.message : '文件读取失败，请重试');
+    }
+  });
   // 取消选择：清理 input，不做任何提示（正常取消不算错误）
   input.addEventListener('cancel', ()=>{ if(!done){ done=true; cleanup(); } });
   input.click();
@@ -787,7 +779,7 @@ function showImportPreview(recs){
   recs.forEach(r=>{ if(r.type==='expense') byCat[r.category]=(byCat[r.category]||0)+1; });
   const catStr = Object.keys(byCat).sort((a,b)=>byCat[b]-byCat[a])
     .map(c=>`${catName(c).emoji} ${esc(c)} ×${byCat[c]}`).join('　');
-  document.getElementById('pvSummary').innerHTML =
+  $('pvSummary').innerHTML =
     `共识别 <b>${recs.length}</b> 条　支出 ¥${fmt(exp)}　收入 ¥${fmt(inc)}` +
     (catStr?`<br><span class="pv-cats">${catStr}</span>`:'');
   const MAX = 300;
@@ -800,9 +792,9 @@ function showImportPreview(recs){
       <span class="pv-amt ${r.type==='income'?'income':'expense'}">${r.type==='income'?'+':'−'}${fmt(r.amount)}</span>
     </div>`;
   }).join('');
-  document.getElementById('pvList').innerHTML = list +
+  $('pvList').innerHTML = list +
     (recs.length>MAX?`<div class="pv-more">… 仅显示前 ${MAX} 条，共 ${recs.length} 条</div>`:'');
-  document.getElementById('pvConfirm').textContent = `确认导入 ${recs.length} 条`;
+  $('pvConfirm').textContent = `确认导入 ${recs.length} 条`;
   openOverlayEl('previewOverlay');
 }
 function closePreview(){ closeOverlayEl('previewOverlay'); }
@@ -843,13 +835,13 @@ function writeRecs(recs){
 // "再导一份" 浮动提示：显示 3.5 秒，点击继续选文件
 function showContinueImport(){
   // 若已存在则不重复创建
-  let el = document.getElementById('continueImport');
+  let el = $('continueImport');
   if(!el){
     el = document.createElement('div');
     el.id = 'continueImport';
-    el.innerHTML = `💡 <b>还要导别的账单吗？</b><button id="contBtn">再导一份</button>`;
+    el.innerHTML = `💡 <b>还要导别的账单吗？</b><button type="button" id="contBtn">再导一份</button>`;
     document.body.appendChild(el);
-    el.querySelector('#contBtn').onclick = () => { el.classList.remove('show'); pickFile(); };
+    el.querySelector('#contBtn').addEventListener('click', () => { el.classList.remove('show'); pickFile(); });
   }
   el.classList.add('show');
   clearTimeout(el._t);
@@ -864,7 +856,7 @@ function loadRemindDismissed(){
 }
 function saveRemindDismissed(){ localStorage.setItem('expense-remind-dismissed', JSON.stringify(remindDismissed)); }
 function checkImportReminder(){
-  const el = document.getElementById('importReminder');
+  const el = $('importReminder');
   if(!el) return;
   const now = new Date();
   const curYM = currentMonth();
@@ -881,8 +873,8 @@ function checkImportReminder(){
     <button type="button" id="remindGo">去导入</button>
     <button type="button" class="x" id="remindX" aria-label="忽略本次提醒">✕</button>`;
   el.style.display = 'flex';
-  el.querySelector('#remindGo').onclick = ()=>{ remindDismissed[lastYM]=true; saveRemindDismissed(); el.style.display='none'; importBill(); };
-  el.querySelector('#remindX').onclick = ()=>{ remindDismissed[lastYM]=true; saveRemindDismissed(); el.style.display='none'; };
+  el.querySelector('#remindGo').addEventListener('click', ()=>{ remindDismissed[lastYM]=true; saveRemindDismissed(); el.style.display='none'; importBill(); });
+  el.querySelector('#remindX').addEventListener('click', ()=>{ remindDismissed[lastYM]=true; saveRemindDismissed(); el.style.display='none'; });
 }
 function buildDupIndex(){ dupIndex = new Set(data.map(dupKey)); }
 function isDup(r){
@@ -900,63 +892,92 @@ function renderAll(){
   checkImportReminder();
 }
 
-/* ============ 事件绑定 ============ */
-function bind(){
-  // 月份切换
-  document.getElementById('prevMonth').onclick = ()=>{
+/* ============ 事件绑定 ============
+ * 统一用 addEventListener；会被反复重建的内容（分类胶囊、月份格子、分类/渠道选项、
+ * 预算输入框）用「事件委托」挂在稳定的父容器上，只绑一次，避免每次重绘都重新绑定。
+ */
+function bindHeader(){
+  // 月份前后切换
+  $('prevMonth').addEventListener('click', ()=>{
     const [y,m]=viewMonth.split('-').map(Number);
     viewMonth = (m===1 ? (y-1)+'-12' : y+'-'+String(m-1).padStart(2,'0'));
     renderAll();
-  };
-  document.getElementById('nextMonth').onclick = ()=>{
+  });
+  $('nextMonth').addEventListener('click', ()=>{
     const [y,m]=viewMonth.split('-').map(Number);
     viewMonth = (m===12 ? (y+1)+'-01' : y+'-'+String(m+1).padStart(2,'0'));
     renderAll();
-  };
+  });
 
-  // 总预算输入（一次性绑定）
-  document.getElementById('budgetTotal').addEventListener('input', ()=>{
-    const v = toCents(document.getElementById('budgetTotal').value);
-    budget.total = v>0 ? v : 0;
+  // 总预算输入（每敲一个字就存，故只更新头部，不重绘整个统计页）
+  $('budgetTotal').addEventListener('input', ()=>{
+    const v = toCents($('budgetTotal').value);
+    budget.total = v > 0 ? v : 0;
     saveBudget();
     renderHeader();
   });
+}
 
-  // 月份选择器
-  document.getElementById('monthBtn').onclick = openMonthPicker;
-  document.getElementById('mpPrev').onclick = ()=>{ pickerYear--; renderMonthGrid(); };
-  document.getElementById('mpNext').onclick = ()=>{ pickerYear++; renderMonthGrid(); };
-  document.getElementById('mpToday').onclick = ()=>{
+function bindTabs(){
+  $$('nav.tabs .tab').forEach(tab=>{
+    tab.addEventListener('click', ()=>{
+      currentTab = tab.dataset.tab;
+      $$('nav.tabs .tab').forEach(t=>{
+        const on = t===tab;
+        t.classList.toggle('active', on);
+        if(on) t.setAttribute('aria-current','page'); else t.removeAttribute('aria-current');
+      });
+      $('panel-ledger').classList.toggle('active', currentTab==='ledger');
+      $('panel-stats').classList.toggle('active', currentTab==='stats');
+      if(currentTab==='stats' && statsDirty){ renderStats(); statsDirty=false; }
+    });
+  });
+}
+
+function bindMonthPicker(){
+  $('monthBtn').addEventListener('click', openMonthPicker);
+  $('mpPrev').addEventListener('click', ()=>{ pickerYear--; renderMonthGrid(); });
+  $('mpNext').addEventListener('click', ()=>{ pickerYear++; renderMonthGrid(); });
+  $('mpToday').addEventListener('click', ()=>{
     viewMonth = currentMonth();
     pickerYear = todayYear();
     renderMonthGrid();
     closeMonthPicker();
     renderAll();
-  };
-  document.getElementById('monthOverlay').addEventListener('click', e=>{
+  });
+  // 12 个月份格子是每次重绘生成的，用委托
+  $('monthGrid').addEventListener('click', e=>{
+    const b = e.target.closest('.m');
+    if(!b) return;
+    viewMonth = pickerYear + '-' + String(b.dataset.mo).padStart(2,'0');
+    closeMonthPicker();
+    renderAll();
+  });
+  $('monthOverlay').addEventListener('click', e=>{
     if(e.target===e.currentTarget) closeMonthPicker();
   });
+}
 
-  // Tab
-  document.querySelectorAll('nav.tabs .tab').forEach(tab=>{
-    tab.onclick = ()=>{
-      currentTab = tab.dataset.tab;
-      document.querySelectorAll('nav.tabs .tab').forEach(t=>{
-        const on = t===tab;
-        t.classList.toggle('active', on);
-        if(on) t.setAttribute('aria-current','page'); else t.removeAttribute('aria-current');
-      });
-      document.getElementById('panel-ledger').classList.toggle('active', currentTab==='ledger');
-      document.getElementById('panel-stats').classList.toggle('active', currentTab==='stats');
-      if(currentTab==='stats' && statsDirty){ renderStats(); statsDirty=false; }
-    };
+function bindLedger(){
+  $('fabAdd').addEventListener('click', ()=>openSheet(null));
+
+  // 点击列表项编辑（列表每次重绘，用委托）
+  $('ledgerList').addEventListener('click', e=>{
+    const item = e.target.closest('.item');
+    if(item) openSheet(item.dataset.id);
   });
 
-  // FAB
-  document.getElementById('fabAdd').onclick = ()=>openSheet(null);
+  // 分类筛选胶囊（每次重绘，用委托）
+  $('catFilter').addEventListener('click', e=>{
+    const chip = e.target.closest('.cf');
+    if(!chip) return;
+    viewCat = chip.dataset.cat;
+    renderCatFilter();
+    renderLedger();
+  });
 
   // 桌面鼠标：滚轮横向滚动分类筛选条（触屏本来就能滑动，故只在需要滚动时接管）
-  const catFilterEl = document.getElementById('catFilter');
+  const catFilterEl = $('catFilter');
   catFilterEl.addEventListener('wheel', e => {
     if(catFilterEl.scrollWidth <= catFilterEl.clientWidth) return;   // 未溢出则不拦截
     const d = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
@@ -964,31 +985,69 @@ function bind(){
     e.preventDefault();
   }, {passive:false});
 
-  // 点击列表项编辑
-  document.getElementById('ledgerList').addEventListener('click', e=>{
-    const item = e.target.closest('.item');
-    if(item) openSheet(item.dataset.id);
+  // 分类预算输入（每次重绘，用委托；改完只刷新头部）
+  $('budgetCats').addEventListener('input', e=>{
+    const inp = e.target.closest('.bc-in');
+    if(!inp) return;
+    const name = inp.dataset.cat;
+    const cents = toCents(parseFloat(inp.value));
+    if(cents > 0) budget.cats[name] = cents; else delete budget.cats[name];
+    saveBudget();
+    const used = monthTransactions(viewMonth)
+      .filter(t=>t.type==='expense' && t.category===name)
+      .reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
+    const over = cents > 0 && used > cents;
+    inp.style.color = over ? 'var(--expense)' : 'var(--ink)';
+    inp.style.fontWeight = over ? '700' : '400';
+    inp.style.borderBottomColor = over ? 'var(--expense)' : '#d5dbe6';
+    renderHeader();
+  });
+}
+
+function bindSheet(){
+  // 支出 / 收入切换
+  $$('#typeSeg button').forEach(b=>b.addEventListener('click', ()=>setType(b.dataset.type)));
+
+  // 分类与渠道选项（每次重绘，用委托）
+  $('catGrid').addEventListener('click', e=>{
+    const c = e.target.closest('.c');
+    if(c) setCat(c.dataset.name);
+  });
+  $('chanGrid').addEventListener('click', e=>{
+    const c = e.target.closest('.ch');
+    if(c) setChannel(c.dataset.name);
   });
 
-  // 类型切换
-  document.querySelectorAll('#typeSeg button').forEach(b=>b.onclick=()=>setType(b.dataset.type));
-
-  // 保存/删除/关闭
-  document.getElementById('saveBtn').onclick = saveEntry;
-  document.getElementById('delBtn').onclick = delEntry;
-  document.getElementById('confirmDelBtn').onclick = confirmDel;
-  document.getElementById('confirmCancelBtn').onclick = closeConfirm;
-  document.getElementById('confirmOverlay').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeConfirm(); });
+  // 保存 / 删除 / 关闭
+  $('saveBtn').addEventListener('click', saveEntry);
+  $('delBtn').addEventListener('click', delEntry);
+  $('confirmDelBtn').addEventListener('click', confirmDel);
+  $('confirmCancelBtn').addEventListener('click', closeConfirm);
+  $('confirmOverlay').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeConfirm(); });
   overlay.addEventListener('click', e=>{ if(e.target===overlay) closeSheet(); });
-  document.getElementById('pvConfirm').onclick = confirmImport;
-  document.getElementById('pvCancel').onclick = closePreview;
-  document.getElementById('previewOverlay').addEventListener('click', e=>{ if(e.target===e.currentTarget) closePreview(); });
+}
 
-  // 备份 / 导入弹窗
-  document.getElementById('backupBtn').onclick = openBackup;
-  document.getElementById('bkExport').onclick = exportBackup;
-  document.getElementById('bkImport').onclick = pickFile;
-  document.getElementById('backupOverlay').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeBackup(); });
+function bindImportPreview(){
+  $('pvConfirm').addEventListener('click', confirmImport);
+  $('pvCancel').addEventListener('click', closePreview);
+  $('previewOverlay').addEventListener('click', e=>{ if(e.target===e.currentTarget) closePreview(); });
+}
+
+function bindBackup(){
+  $('backupBtn').addEventListener('click', openBackup);
+  $('bkExport').addEventListener('click', exportBackup);
+  $('bkImport').addEventListener('click', pickFile);
+  $('backupOverlay').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeBackup(); });
+}
+
+function bind(){
+  bindHeader();
+  bindTabs();
+  bindMonthPicker();
+  bindLedger();
+  bindSheet();
+  bindImportPreview();
+  bindBackup();
 }
 
 bind();
