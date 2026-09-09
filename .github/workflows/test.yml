@@ -1,0 +1,24 @@
+# 每次推送到 main、以及每个 Pull Request，都自动跑一遍解析器的回归测试。
+# 本项目零依赖，所以不需要 npm install，直接 npm test 即可（秒级完成）。
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:      # 也允许在 Actions 页面手动触发
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 运行解析器回归测试
+        run: npm test
