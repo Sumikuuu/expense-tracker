@@ -1,0 +1,20 @@
+# 依赖（本项目目前零依赖，留着以防将来引入）
+node_modules/
+package-lock.json
+
+# 编辑器与 IDE
+.vscode/*
+!.vscode/settings.json
+.idea/
+*.swp
+
+# 操作系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+*.tmp
+*.bak
