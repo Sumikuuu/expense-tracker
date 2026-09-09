@@ -37,7 +37,9 @@ python -m http.server 8080
 ## 目录结构
 
 ```
-index.html          单页应用（结构 + 样式 + 逻辑）
+index.html          页面结构（只有标记，样式与逻辑都在外部文件）
+styles.css          全部样式（:root 变量 + 分区 + 桌面端适配）
+app.js              应用主逻辑：状态、渲染、存储、事件（依赖 parser.js）
 parser.js           纯函数模块：账单解析、分类推断、记录规范化（无 DOM 依赖，可单测）
 manifest.json       PWA 清单
 service-worker.js   离线缓存（网络优先，缓存回退）
