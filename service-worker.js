@@ -1,6 +1,6 @@
 /* 月度记账 - Service Worker
  * 缓存静态资源，让 PWA 离线可用。数据存在 localStorage，随之生效。 */
-const CACHE = 'expense-tracker-v8';
+const CACHE = 'expense-tracker-v9';
 const ASSETS = [
   './index.html',
   './styles.css',
@@ -10,8 +10,6 @@ const ASSETS = [
   './vendor/pako.min.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './icons/icon-maskable-192.png',
-  './icons/icon-maskable-512.png',
 ];
 
 self.addEventListener('install', (e) => {

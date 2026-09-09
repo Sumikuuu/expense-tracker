@@ -5,9 +5,7 @@
   "description": "月度记账 —— 纯前端、零依赖的 PWA 记账工具",
   "license": "MIT",
   "scripts": {
-    "test": "node test/parser.test.js && node test/consistency.test.js",
-    "test:parser": "node test/parser.test.js",
-    "test:consistency": "node test/consistency.test.js",
+    "test": "node test/index.js",
     "serve": "npx serve ."
   },
   "keywords": [
