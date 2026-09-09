@@ -52,6 +52,7 @@ parser.js           纯函数模块：账单解析、分类推断、记录规范
 manifest.json       PWA 清单
 service-worker.js   离线缓存（网络优先，缓存回退）
 icons/              PWA 图标（192 / 512，含 maskable）
+screenshots/        安装横幅截图（manifest 引用，用于 Android / 桌面的安装提示）
 vendor/pako.min.js  pako 2.1.0（MIT AND Zlib），仅用于解压 xlsx
 test/parser.test.js parser.js 的回归测试（零依赖）
 ```

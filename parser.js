@@ -43,19 +43,39 @@ const INCOME_CATS = [
 ];
 
 /* ===== 基础工具：金额 / 文本 / 显示 ===== */
+/**
+ * 元 → 整数分（四舍五入）。非法输入返回 0，绝不抛异常。
+ * @param {number|string} x 金额（元）
+ * @returns {number} 金额（分）
+ */
 function toCents(x){
   const n = parseFloat(x);
   if(!isFinite(n)) return 0;
   return Math.round(n*100);
 }
+/**
+ * 分 → 显示字符串（固定两位小数）。
+ * @param {number} n 金额（分）
+ * @returns {string} 例如 3550 → "35.50"
+ */
 function fmt(n){ // 输入为「分」，显示为元（两位小数）
   const c = Math.round(parseFloat(n)||0);
   return (c/100).toLocaleString('zh-CN', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
+/**
+ * 分 → 显示字符串（最多两位小数、带千分位），用于统计与图表。
+ * @param {number} n 金额（分）
+ * @returns {string} 例如 348990 → "3,489.9"
+ */
 function fmtSci(n){ // 输入为「分」，显示为元（最多两位）
   const c = Math.round(parseFloat(n)||0);
   return (c/100).toLocaleString('zh-CN', {maximumFractionDigits:2});
 }
+/**
+ * 转义 HTML 特殊字符，所有拼进 innerHTML 的用户数据都必须先过这里。
+ * @param {*} s 任意值（null/undefined 视为空串）
+ * @returns {string}
+ */
 function esc(s){
   return String(s==null?'':s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
@@ -74,6 +94,12 @@ function cleanVal(v){
 
 /* ===== xlsx 解析（依赖 pako 解压，见 unzip 的依赖注入） ===== */
 
+/**
+ * 解析 zip 字节流，返回 { 文件名: 内容 } 映射（只读本地文件头，遇到中央目录即停止）。
+ * @param {Uint8Array} u8 zip 文件字节
+ * @param {Function} [inflateRaw] 解压函数；缺省用全局 pako.inflateRaw（便于测试注入）
+ * @returns {Object<string, Uint8Array>}
+ */
 function unzip(u8, inflateRaw){
   // 解压依赖可注入：浏览器用全局 pako，Node 测试可传桩函数
   const inflate = inflateRaw || (typeof pako !== 'undefined' ? pako.inflateRaw : null);
@@ -108,6 +134,11 @@ function unzip(u8, inflateRaw){
 }
 
 // 简单 xlsx→CSV 文本转换（共享字符串 + 序列号日期 → 日期字符串），依赖 pako
+/**
+ * xlsx（二进制）→ CSV 文本，便于复用 parseBill 的解析逻辑。
+ * @param {ArrayBuffer} buf xlsx 文件内容
+ * @returns {string|null} CSV 文本；解析失败返回 null（不抛异常）
+ */
 function parseXlsxText(buf){
   try{
     // 解析 zip 目录，取每个条目内容
@@ -190,12 +221,24 @@ function sheetToCsv(xml, shared){
   }
   return rows.map(r => r.map((cv,ci) => normalizeCell(cv,ci)).join(',')).join('\n');
 }
+/**
+ * Excel 列字母 → 0 基列号。
+ * @param {string} s 例如 "A"、"AA"
+ * @returns {number} 例如 0、26
+ */
 function colLetterToNum(s){
   let n=0;
   for(const ch of s){ n = n*26 + (ch.charCodeAt(0)-64); }
   return n-1; // 0-based
 }
 // Excel 单元格值 -> 合适字符串。仅对第1列(时间列)把日期序列号转成日期，避免金额被误转
+/**
+ * 规范化单元格值：只有第 1 列（时间列）的 Excel 日期序列号才转成日期，
+ * 避免金额列被误转。
+ * @param {string} v 原始值
+ * @param {number} ci 0 基列号
+ * @returns {string}
+ */
 function normalizeCell(v, ci){
   if(v==='') return '';
   if(/^\d+(\.\d+)?$/.test(v)){
@@ -205,6 +248,11 @@ function normalizeCell(v, ci){
   }
   return v;
 }
+/**
+ * Excel 日期序列号 → "YYYY-MM-DD"（已修正 1900 年闰年 bug）。
+ * @param {number} serial 例如 45000
+ * @returns {string} 例如 "2023-03-15"
+ */
 function excelDateToStr(serial){
   // Excel 序列号，(1900-01-01) 1 = 1900-01-01。修正 1900-02-29 bug
   let d = new Date(Date.UTC(1899,11,30) + Math.floor(serial)*86400000);
@@ -215,6 +263,12 @@ function excelDateToStr(serial){
 
 /* ===== 账单文本解析（微信 / 支付宝通用） ===== */
 
+/**
+ * 把 CSV / 账单文本切成二维数组。
+ * 引号内的逗号与换行不会被切开，"" 表示一个引号；整行为空的行会被丢弃。
+ * @param {string} text
+ * @returns {string[][]} 行 → 单元格数组
+ */
 function toRows(text){
   // 单遍字符扫描：引号内不切行、不切列，支持 "" 转义，
   // 因此备注里带换行/逗号的账单也不会断行丢记录
@@ -249,6 +303,14 @@ function toRows(text){
 // 兼容两种列结构：
 //   A 交易流水式：交易时间,交易分类/商品说明,收/支,金额(元),支付方式,...
 //   B 记账本明细式：记录时间,分类,收支类型,金额,备注,账户,来源,标签,...
+/**
+ * 解析微信 / 支付宝账单文本，返回可写入的记录数组。
+ * 自动定位表头（需同时含「时间」与「金额」列），跳过收/支为「/」的中性交易，
+ * 并推断分类与支付渠道。
+ * @param {string} text 账单文本（CSV；xlsx 请先用 parseXlsxText 转换）
+ * @returns {Array<{id:string,type:'expense'|'income',amount:number,category:string,
+ *   note:string,date:string,channel:string,updatedAt:number}>}
+ */
 function parseBill(text){
   const rows = toRows(text);
   if(!rows.length) return [];
@@ -307,6 +369,11 @@ function parseBill(text){
 }
 
 // 支付宝分类 → 内置分类
+/**
+ * 支付宝自带分类 → 内置分类。
+ * @param {string} c 支付宝分类名
+ * @returns {string|null} 未知分类返回 null，交由关键词推断
+ */
 function mapAlipayCat(c){
   const m = {
     '交通':'交通','餐饮':'餐饮','购物':'购物','娱乐':'娱乐','休闲玩乐':'娱乐',
@@ -319,6 +386,12 @@ function mapAlipayCat(c){
 }
 
 // 关键词 → 分类（传入的 s 已合并 交易对方+商品+备注）
+/**
+ * 根据交易描述推断分类（关键词匹配，顺序敏感：靠前的规则优先命中）。
+ * @param {'expense'|'income'} type 收支类型
+ * @param {string} s 已合并的「交易对方 + 商品 + 备注 + 状态」文本
+ * @returns {string} 内置分类名
+ */
 function guessCat(type, s){
   if(type==='income'){
     if(/退款|退回|极速退款/.test(s)) return '其他';        // 退款/退回是返还，不是收入
@@ -350,6 +423,13 @@ function guessCat(type, s){
 }
 
 // 支付方式/描述 → 渠道
+/**
+ * 根据支付方式 / 商品 / 交易对方推断支付渠道。
+ * @param {string} pay 支付方式列
+ * @param {string} desc 商品说明列
+ * @param {string} party 交易对方列
+ * @returns {string} 内置渠道名
+ */
 function guessChannel(pay, desc, party){
   const s = pay+desc+party;
   // 先判支付宝(含“支付宝/小程序”字样)，再判微信，避免“支付宝小程序”被误判
@@ -361,12 +441,25 @@ function guessChannel(pay, desc, party){
 }
 
 /* ===== 记录规范化与去重键 ===== */
+/**
+ * 生成去重键：日期|类型|金额|分类|备注。用于把去重判断从 O(N×M) 降到 O(1)。
+ * @param {Object} r 记录
+ * @returns {string}
+ */
 function dupKey(r){
   return [r.date||'', r.type||'', r.amount||0, r.category||'', r.note||''].join('\u0001');
 }
 
 // 备份记录校验：字段非法或分类/渠道不在名单内的记录一律丢弃或回落，
 // 避免脏数据进入渲染流程（date 会被拼进 innerHTML，必须严格限定为 YYYY-MM-DD）
+/**
+ * 校验并净化从备份文件导入的单条记录。
+ * 日期必须是合法 YYYY-MM-DD（含月日范围校验），金额必须为正，
+ * 未知分类 / 渠道回落「其他」，备注截断到 60 字。
+ * @param {Object} r 原始记录（来自不可信的 JSON 文件）
+ * @param {boolean} isCents 原记录金额单位是否已是「分」
+ * @returns {Object|null} 合法记录；非法则返回 null（调用方计数后丢弃）
+ */
 function normalizeImportedRecord(r, isCents){
   if(!r || typeof r !== 'object') return null;
   const date = String(r.date == null ? '' : r.date).slice(0, 10);
