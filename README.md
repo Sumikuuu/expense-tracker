@@ -38,11 +38,23 @@ python -m http.server 8080
 
 ```
 index.html          单页应用（结构 + 样式 + 逻辑）
+parser.js           纯函数模块：账单解析、分类推断、记录规范化（无 DOM 依赖，可单测）
 manifest.json       PWA 清单
 service-worker.js   离线缓存（网络优先，缓存回退）
 icons/              PWA 图标（192 / 512，含 maskable）
 vendor/pako.min.js  pako 2.1.0（MIT AND Zlib），仅用于解压 xlsx
+test/parser.test.js parser.js 的回归测试（零依赖）
 ```
+
+## 运行测试
+
+`parser.js` 里的解析与分类逻辑是纯函数，不需要浏览器就能测试：
+
+```bash
+npm test          # 等价于 node test/parser.test.js
+```
+
+只用 Node 内置的 `assert`，不需要安装任何依赖。新增用例时，照着 `test/parser.test.js` 里任意一个 `test(...)` 复制修改即可；断言失败脚本会以非 0 退出码结束，方便以后接 CI。
 
 ## 技术说明
 
