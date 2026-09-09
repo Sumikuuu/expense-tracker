@@ -1,4 +1,6 @@
-# 每次推送到 main、以及每个 Pull Request，都自动跑一遍解析器的回归测试。
+# 每次推送到 main、以及每个 Pull Request，都自动跑一遍测试：
+#   test/parser.test.js       —— 账单解析与分类逻辑的回归测试
+#   test/consistency.test.js  —— 资源引用 / 离线缓存清单 / 模块导出一致性
 # 本项目零依赖，所以不需要 npm install，直接 npm test 即可（秒级完成）。
 name: tests
 
@@ -20,5 +22,5 @@ jobs:
         with:
           node-version: '22'
 
-      - name: 运行解析器回归测试
+      - name: 运行测试（解析逻辑回归 + 项目一致性）
         run: npm test
