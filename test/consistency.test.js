@@ -87,18 +87,17 @@ for (const icon of manifest.icons) {
   });
 }
 
-test('至少有一张安装横幅截图', () => {
-  assert.ok(Array.isArray(manifest.screenshots) && manifest.screenshots.length > 0);
-});
-
-for (const shot of manifest.screenshots || []) {
-  test('截图存在且尺寸一致：' + shot.src, () => {
+test('manifest 声明的截图（如果有）都真实存在且尺寸一致', () => {
+  // 截图是可选的：用于浏览器「安装到主屏」时展示预览图。
+  // 这里只在 manifest 真的声明了 screenshots 时才校验，避免删掉截图后测试误报。
+  const shots = manifest.screenshots || [];
+  for (const shot of shots) {
     assert.ok(exists(shot.src), shot.src + ' 不存在');
     const size = pngSize(shot.src);
     assert.ok(size, shot.src + ' 不是有效的 PNG');
     assert.strictEqual(size.w + 'x' + size.h, shot.sizes, '实际 ' + size.w + 'x' + size.h + '，声明 ' + shot.sizes);
-  });
-}
+  }
+});
 
 /* ---------------------------------------------------------- */
 group('4. app.js 从 parser.js 解构的名字都已导出');

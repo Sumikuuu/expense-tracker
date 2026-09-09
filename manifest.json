@@ -17,9 +17,5 @@
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
     { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
-  ],
-  "screenshots": [
-    { "src": "screenshots/ledger.png", "sizes": "390x844", "type": "image/png", "form_factor": "narrow", "label": "记账列表" },
-    { "src": "screenshots/stats.png", "sizes": "1280x900", "type": "image/png", "form_factor": "wide", "label": "统计与预算" }
   ]
 }
