@@ -4,30 +4,10 @@
  * 零依赖：只用 Node 内置的 assert，不需要安装任何东西。
  * 运行： node test/parser.test.js    或    npm test
  *
- * 用法约定：test('用例名', () => { assert(...) })
- * 断言不通过会抛异常，该用例即失败，脚本最后以非 0 退出码结束（便于接 CI）。
  * 想加新用例，照着下面任何一个 test() 复制一份改即可。
  * ============================================================ */
-const assert = require('node:assert');
 const P = require('../parser.js');
-
-let passed = 0;
-const failures = [];
-
-function test(name, fn) {
-  try {
-    fn();
-    passed++;
-    console.log('  ✓ ' + name);
-  } catch (err) {
-    failures.push(name);
-    console.log('  ✗ ' + name);
-    console.log('      ' + err.message.split('\n')[0]);
-  }
-}
-function group(title) {
-  console.log('\n' + title);
-}
+const { test, group, finish, assert } = require('./runner.js');
 
 /* ---------------------------------------------------------- */
 group('1. 金额转换与显示');
@@ -245,11 +225,4 @@ test('normalizeImportedRecord：未知分类 / 渠道回落「其他」', () => 
 });
 
 /* ---------------------------------------------------------- */
-console.log('\n' + '='.repeat(46));
-console.log('通过 ' + passed + ' 个，失败 ' + failures.length + ' 个');
-if (failures.length) {
-  console.log('失败用例：');
-  for (const f of failures) console.log('  - ' + f);
-  process.exit(1);
-}
-console.log('全部通过 ✓');
+finish();

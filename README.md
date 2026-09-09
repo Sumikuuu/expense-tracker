@@ -54,18 +54,27 @@ service-worker.js   离线缓存（网络优先，缓存回退）
 icons/              PWA 图标（192 / 512，含 maskable）
 screenshots/        安装横幅截图（manifest 引用，用于 Android / 桌面的安装提示）
 vendor/pako.min.js  pako 2.1.0（MIT AND Zlib），仅用于解压 xlsx
-test/parser.test.js parser.js 的回归测试（零依赖）
+test/parser.test.js       解析与分类逻辑的回归测试（45 项）
+test/consistency.test.js  项目一致性检查：资源引用 / 离线缓存清单 / 清单图标 / 模块导出
+test/runner.js            极简测试运行器（两个测试文件共用）
 ```
 
 ## 运行测试
 
-`parser.js` 里的解析与分类逻辑是纯函数，不需要浏览器就能测试：
+不需要浏览器，也不需要安装任何依赖（只用 Node 内置的 `assert`）：
 
 ```bash
-npm test          # 等价于 node test/parser.test.js
+npm test                  # 跑下面两个套件
+npm run test:parser       # 只跑解析逻辑回归（45 项）
+npm run test:consistency  # 只跑项目一致性检查（26 项）
 ```
 
-只用 Node 内置的 `assert`，不需要安装任何依赖。新增用例时，照着 `test/parser.test.js` 里任意一个 `test(...)` 复制修改即可；断言失败脚本会以非 0 退出码结束，方便以后接 CI。
+两个套件都做这些事：
+
+- **parser.test.js**：账单解析、分类推断、CSV 边界、备份净化、去重键等业务逻辑
+- **consistency.test.js**：防止「改了 A 忘了改 B」——例如 `index.html` 引用了一个不存在的文件、新增文件忘了加进 Service Worker 的离线缓存清单、`manifest.json` 声明的图标尺寸与实际不符、`app.js` 从 `parser.js` 解构了没导出的名字
+
+断言失败时脚本以非 0 退出码结束，GitHub Actions 会自动把这次提交标红。新增用例照着 `test/parser.test.js` 里任意一个 `test(...)` 复制修改即可。
 
 ## 技术说明
 
