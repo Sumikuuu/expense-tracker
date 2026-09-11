@@ -263,6 +263,95 @@ test('normalizeImportedRecord：未知分类 / 渠道回落「其他」', () => 
   assert.strictEqual(r.channel, '其他');
 });
 
+/* ---------------------------------------------------------- */
+group('10. 月份索引与聚合（stats.js）');
+
+const S = require('../stats.js');
+
+const mk = (date, amount, type, category, channel) => ({
+  id: String(date) + amount + (category || ''),
+  date: date, amount: amount,
+  type: type || 'expense',
+  category: category || '餐饮',
+  channel: channel || '现金',
+  note: '',
+});
+
+test('build：按月分桶，支出/收入分别累计', () => {
+  const idx = S.build([
+    mk('2026-08-01', 1000), mk('2026-08-15', 2000), mk('2026-08-20', 500, 'income', '工资'),
+    mk('2026-07-31', 300),
+  ]);
+  assert.strictEqual(S.monthList(idx, '2026-08').length, 3);
+  assert.strictEqual(S.monthList(idx, '2026-07').length, 1);
+  const a = S.monthAgg(idx, '2026-08');
+  assert.strictEqual(a.exp, 3000);
+  assert.strictEqual(a.inc, 500);
+});
+
+test('build：分类/渠道聚合只统计支出', () => {
+  const idx = S.build([
+    mk('2026-08-01', 1000, 'expense', '餐饮', '微信零钱'),
+    mk('2026-08-02', 400, 'expense', '餐饮', '支付宝'),
+    mk('2026-08-03', 9999, 'income', '工资', '银行卡'),
+  ]);
+  const a = S.monthAgg(idx, '2026-08');
+  assert.strictEqual(a.byCat['餐饮'], 1400);
+  assert.deepStrictEqual(Object.keys(a.byCat), ['餐饮']);
+  assert.strictEqual(a.byCh['微信零钱'], 1000);
+  assert.strictEqual(a.byCh['支付宝'], 400);
+  assert.strictEqual(a.byCh['银行卡'], undefined);   // 收入不进渠道统计
+});
+
+test('build：未知 type 两边都不计（与旧的 sum(list,"expense") 一致）', () => {
+  const idx = S.build([mk('2026-08-01', 1000, '转账'), mk('2026-08-02', 200, 'expense')]);
+  const a = S.monthAgg(idx, '2026-08');
+  assert.strictEqual(a.exp, 200);
+  assert.strictEqual(a.inc, 0);
+});
+
+test('build：缺失/非法日期的记录不进任何真实月份', () => {
+  const idx = S.build([mk(undefined, 100), mk(null, 100), { amount: 500, type: 'expense' }]);
+  assert.strictEqual(S.monthList(idx, '2026-08').length, 0);
+  assert.strictEqual(S.monthAgg(idx, '2026-08').exp, 0);
+  assert.strictEqual(S.monthList(idx, '').length, 3);   // 统一落在 '' 桶里
+});
+
+test('monthList / monthAgg：缺失月份返回空数组与全零对象，而不是 undefined', () => {
+  const idx = S.build([]);
+  assert.deepStrictEqual(S.monthList(idx, '2020-01'), []);
+  const a = S.monthAgg(idx, '2020-01');
+  assert.strictEqual(a.exp, 0);
+  assert.strictEqual(a.inc, 0);
+  assert.deepStrictEqual(Object.keys(a.byCat), []);
+  assert.notStrictEqual(S.monthAgg(idx, '2020-01'), a);   // 每次新建，避免共享可变状态被误改
+});
+
+test('groupByDate：日期倒序、同日期归一组、组内支出合计正确', () => {
+  const g = S.groupByDate([
+    mk('2026-08-01', 100), mk('2026-08-03', 200), mk('2026-08-01', 300, 'income'), mk('2026-08-03', 400),
+  ]);
+  assert.deepStrictEqual(g.map(x => x.date), ['2026-08-03', '2026-08-01']);
+  assert.strictEqual(g[0].records.length, 2);
+  assert.strictEqual(g[0].expense, 600);   // 200 + 400
+  assert.strictEqual(g[1].expense, 100);   // 同组的收入 300 不计入
+  assert.strictEqual(g[0].records[0].amount, 200);   // 组内保持原有相对顺序
+});
+
+test('groupByDate：不修改入参（回归：账本传进去的就是索引内部数组）', () => {
+  const src = [mk('2026-08-01', 100), mk('2026-08-03', 200)];
+  const copy = src.slice();
+  S.groupByDate(src);
+  assert.deepStrictEqual(src, copy);   // 若内部就地 sort，这里会被改成倒序而失败
+});
+
+test('monthRange：含末尾月，跨年借位正确', () => {
+  assert.deepStrictEqual(S.monthRange('2026-08', 6),
+    ['2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08']);
+  assert.deepStrictEqual(S.monthRange('2026-01', 3), ['2025-11', '2025-12', '2026-01']);
+  assert.deepStrictEqual(S.monthRange('2026-01', 1), ['2026-01']);
+});
+
 const ROOT = path.join(__dirname, '..');
 const readText = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const exists = f => fs.existsSync(path.join(ROOT, f));
@@ -380,6 +469,23 @@ test('Service Worker 缓存名符合 expense-tracker-vN 格式', () => {
   const m = sw.match(/const\s+CACHE\s*=\s*'([^']+)'/);
   assert.ok(m, '找不到 CACHE 常量');
   assert.match(m[1], /^expense-tracker-v\d+$/, '当前值：' + m[1]);
+});
+
+/* ---------------------------------------------------------- */
+group('6. app.js 从 stats.js 解构的名字都已导出');
+
+test('能解析出 window.ExpenseStats 的解构语句', () => {
+  const m = appJs.match(/const\s*\{([^}]+)\}\s*=\s*window\.ExpenseStats/);
+  assert.ok(m, 'app.js 里找不到 window.ExpenseStats 的解构语句');
+});
+
+test('每个名字都在 stats.js 的导出里（含 build as xxx 这类别名）', () => {
+  const m = appJs.match(/const\s*\{([^}]+)\}\s*=\s*window\.ExpenseStats/);
+  // 别名要取冒号左边（导出的名字）：{build: buildMonthIndex} → build
+  const names = m[1].split(',').map(s => s.split(':')[0].trim()).filter(Boolean);
+  const exported = Object.keys(require('../stats.js'));
+  const missing = names.filter(n => !exported.includes(n));
+  assert.deepStrictEqual(missing, [], 'stats.js 未导出：' + missing.join(', '));
 });
 
 finish();

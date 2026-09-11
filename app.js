@@ -12,14 +12,27 @@
 const {
   CATEGORIES, CHANNELS, INCOME_CATS, toCents, fmt, fmtSci, esc, catName, channelName, parseXlsxText, parseBill, dupKey, normalizeImportedRecord
 } = window.ExpenseParser;
+/* ===== 从 stats.js 引入月份索引与聚合（纯函数，无 DOM 依赖，可单独测试） ===== */
+const {build: buildMonthIndex, monthList, monthAgg, groupByDate, monthRange} = window.ExpenseStats;
 
 /* ===== DOM 查询简写 ===== */
 const $  = id => document.getElementById(id);              // 按 id
 const $$ = sel => document.querySelectorAll(sel);          // 按选择器（返回 NodeList）
 
+// 读取 CSS 变量的当前值。canvas 的 fillStyle/strokeStyle 不认 CSS 变量，
+// 只能这样取值；每次调用都重新读，因此系统切换明暗后重绘即可自动跟随。
+function themeVar(name, fallback){
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback || '';
+}
+
 const STORE_KEY = 'expense-tracker-v1';
 // 去重索引：dupKey → Set，避免导入时对 data 反复全量扫描（O(N×M)）
 let dupIndex = null;
+// 月份索引：一次扫描建「月份 → 记录 / 聚合」两张表，取代每次渲染的 10 次全量扫描
+// （表头/账本/统计各 1 次 + 趋势图 6 次 + 导入提醒 1 次）。
+// 与 dupIndex 同策略：懒建、save() 时失效；改动 data 的每条路径后面都会调 save()。
+let monthIndex = null;
 const BUDGET_KEY = 'expense-budget-v1';
 
 let data = load();
@@ -76,7 +89,8 @@ function load(){
   }catch(e){ return []; }
 }
 function save(){
-  dupIndex = null;   // 数据已变更，去重索引失效，下次导入时重建
+  dupIndex = null;    // 数据已变更，去重索引失效，下次导入时重建
+  monthIndex = null;  // 月份索引同理失效（所有会改 data 的路径都以 save() 收尾）
   try{
     localStorage.setItem(STORE_KEY, JSON.stringify(data));
     return true;
@@ -229,11 +243,19 @@ function todayStr(){
   const d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
-function monthTransactions(m){
-  return data.filter(t => (t.date||'').slice(0,7) === m);
+// 月份索引懒建：第一次用到时扫一遍 data，之后每次取月都是 O(1)
+function getMonthIndex(){
+  if(!monthIndex) monthIndex = buildMonthIndex(data);
+  return monthIndex;
 }
-function sum(list, type){
-  return list.filter(t => (type? t.type===type : true)).reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
+// 取某月记录。返回的是索引内部的数组，**调用方只读**：
+// 需要排序/修改请先复制（groupByDate 内部已复制，账本那条路径安全）
+function monthTransactions(m){
+  return monthList(getMonthIndex(), m);
+}
+// 取某月聚合（支出/收入/分类/渠道）
+function monthStats(m){
+  return monthAgg(getMonthIndex(), m);
 }
 
 /* ============ 头部月份 ============ */
@@ -242,10 +264,10 @@ function renderHeader(){
   const label = (y===new Date().getFullYear() && m===new Date().getMonth()+1) ? '本月' : (y+'年'+m+'月');
   $('monthLabel').textContent = label;
   const list = monthTransactions(viewMonth);
-  const exp = sum(list,'expense');
+  const st = monthStats(viewMonth);
+  const exp = st.exp;
   $('totalExpense').textContent = '¥' + fmt(exp);
-  const inc = sum(list,'income');
-  $('monthSub').textContent = '收入 ¥' + fmt(inc) + '　·　' + list.length + ' 笔';
+  $('monthSub').textContent = '收入 ¥' + fmt(st.inc) + '　·　' + list.length + ' 笔';
 
   // 本月预算进度
   const tb = totalBudget();
@@ -286,7 +308,7 @@ function renderCatFilter(){
   el.innerHTML = cats.map(c => {
     const sel = c.name===viewCat;
     const col = c.color || 'var(--primary)';
-    const bg = c.color ? hexA(c.color,.14) : '#eef4ff';
+    const bg = c.color ? hexA(c.color,.14) : 'var(--sel-bg)';
     const label = c.label || (c.emoji+ (c.name?' '+c.name:''));
     return `<button type="button" class="cf${sel?' sel':''}" data-cat="${esc(c.name)}"
       style="${sel?`--c:${col};--cgbg:${bg};`:''}">${esc(label)}</button>`;
@@ -296,7 +318,9 @@ function renderCatFilter(){
 }
 
 function renderLedger(){
-  const all = monthTransactions(viewMonth).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  // 不排序：monthTransactions 返回的是索引内部数组（只读），需筛选时 filter 会自行复制。
+  // 日期排序与分组交给 groupByDate，它内部先复制再排，并顺带算好组内支出合计
+  const all = monthTransactions(viewMonth);
   // 按分类名筛选（任意支出/收入的记录匹配即显示）
   const list = viewCat ? all.filter(t => t.category===viewCat) : all;
   const wrap = $('ledgerList');
@@ -306,16 +330,11 @@ function renderLedger(){
       : '<div class="empty"><div class="big">🍃</div>本月还没有记录<br>点右下角 + 记一笔</div>';
     return;
   }
-  // 按日期分组
-  const groups = {};
-  list.forEach(t => { (groups[t.date]=groups[t.date]||[]).push(t); });
   let html = '';
-  Object.keys(groups).forEach(date => {
-    const g = groups[date];
-    const exp = sum(g,'expense');
+  for(const g of groupByDate(list)){
     html += '<div class="date-group">';
-    html += `<div class="date-head"><span>${esc(date)}</span><span class="g-total">支出 ${fmt(exp)}</span></div>`;
-    g.forEach(t => {
+    html += `<div class="date-head"><span>${esc(g.date)}</span><span class="g-total">支出 ${fmt(g.expense)}</span></div>`;
+    for(const t of g.records){
       const c = catName(t.category);
       const ch = channelName(t.channel);
       const signed = (t.type==='income'?'+':'−') + fmt(t.amount);
@@ -327,9 +346,9 @@ function renderLedger(){
         </span>
         <span class="amt ${t.type==='income'?'income':'expense'}">${signed}</span>
       </button>`;
-    });
+    }
     html += '</div>';
-  });
+  }
   wrap.innerHTML = html;
 }
 
@@ -342,8 +361,8 @@ function hexA(hex,a){
 /* ============ 统计 ============ */
 function renderStats(){
   const list = monthTransactions(viewMonth);
-  const exp = sum(list,'expense');
-  const inc = sum(list,'income');
+  const st = monthStats(viewMonth);
+  const exp = st.exp, inc = st.inc;
   $('stExpense').textContent = '¥' + fmtSci(exp);
   $('stIncome').textContent = '¥' + fmtSci(inc);
   $('stBalance').textContent = '¥' + fmtSci(inc-exp);
@@ -416,24 +435,20 @@ function renderTrend(){
   canvas.width = W*dpr; canvas.height = H*dpr;
   ctx.scale(dpr,dpr);
   ctx.clearRect(0,0,W,H);
-  // 构造最近6个月
-  const now = new Date();
-  const months = [];
-  for(let i=5;i>=0;i--){
-    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
-    months.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'));
-  }
-  const vals = months.map(m => sum(monthTransactions(m),'expense'));
+  // 最近 6 个月：以「本月」为准而非当前查看的月份（保持原行为），
+  // 各月支出直接取聚合结果，不再逐月扫描 data
+  const months = monthRange(currentMonth(), 6);
+  const vals = months.map(m => monthStats(m).exp);
   const maxV = Math.max(1, ...vals);
   const padL = 46, padR = 14, padT = 22, padB = 30;
   const innerW = W-padL-padR, innerH = H-padT-padB;
-  // 网格+刻度
-  ctx.strokeStyle='#eef1f6'; ctx.fillStyle='#9aa2af'; ctx.font='10px sans-serif';
+  // 网格+刻度（颜色随明暗切换，见 themeVar）
+  ctx.strokeStyle=themeVar('--chart-grid'); ctx.fillStyle=themeVar('--ink-3'); ctx.font='10px sans-serif';
   ctx.textAlign='right'; ctx.textBaseline='middle';
   for(let g=0; g<=4; g++){
     const y = padT + innerH - (g/4)*innerH;
     ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
-    ctx.fillStyle='#9aa2af';
+    ctx.fillStyle=themeVar('--ink-3');
     ctx.fillText('¥' + fmtSci(maxV*g/4), padL-6, y);
   }
   // 柱
@@ -445,16 +460,16 @@ function renderTrend(){
     const bx = cx-bw/2, by = padT+innerH-barH;
     const isCur = i===vals.length-1;
     const grad = ctx.createLinearGradient(0,by,0,padT+innerH);
-    if(isCur){ grad.addColorStop(0,'#5b8def'); grad.addColorStop(1,'#3f6fd6'); }
-    else { grad.addColorStop(0,'#b8ccf5'); grad.addColorStop(1,'#a9c2f0'); }
+    if(isCur){ grad.addColorStop(0,themeVar('--primary')); grad.addColorStop(1,themeVar('--primary-dark')); }
+    else { grad.addColorStop(0,themeVar('--chart-bar')); grad.addColorStop(1,themeVar('--chart-bar2')); }
     ctx.fillStyle = grad;
     // 圆角柱
     roundRect(ctx,bx,by,bw,Math.max(2,barH),Math.min(5,bw/2)); ctx.fill();
     // 数值
-    ctx.fillStyle='#6b7280';
+    ctx.fillStyle=themeVar('--ink-2');
     if(v>0) ctx.fillText(fmtSci(v), cx, (by-14)<padT? padT+2 : by-14);
     // 月份标签
-    ctx.fillStyle= isCur? '#3f6fd6':'#9aa2af'; ctx.font = (isCur?'700 ':'' )+'10px sans-serif';
+    ctx.fillStyle= isCur? themeVar('--primary-dark'):themeVar('--ink-3'); ctx.font = (isCur?'700 ':'' )+'10px sans-serif';
     ctx.fillText(months[i].slice(5)+'月', cx, padT+innerH+8);
   });
 }
@@ -480,11 +495,11 @@ function drawDonut(sorted, total){
   const r = px/2 - 6, inner = r * 0.60;
   ctx.clearRect(0,0,px,px);
   if(sorted.length===0){
-    ctx.strokeStyle = '#e9edf3'; ctx.lineWidth = 24 * dpr;
+    ctx.strokeStyle = themeVar('--surface-2'); ctx.lineWidth = 24 * dpr;
     // 描边以路径为中线，外侧会溢出 lineWidth/2；收缩半径保证外缘落在画布边距内
     const strokeR = r - 12 * dpr;
     ctx.beginPath(); ctx.arc(cx,cy,strokeR,0,Math.PI*2); ctx.stroke();
-    ctx.fillStyle = '#c8cfda'; ctx.font = `${15*dpr}px sans-serif`; ctx.textAlign='center';
+    ctx.fillStyle = themeVar('--ph'); ctx.font = `${15*dpr}px sans-serif`; ctx.textAlign='center';
     ctx.fillText('暂无支出', cx, cy+5*dpr);
     return;
   }
@@ -997,13 +1012,12 @@ function bindLedger(){
     const cents = toCents(parseFloat(inp.value));
     if(cents > 0) budget.cats[name] = cents; else delete budget.cats[name];
     saveBudget();
-    const used = monthTransactions(viewMonth)
-      .filter(t=>t.type==='expense' && t.category===name)
-      .reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
+    // 该分类本月已花：直接取聚合结果（每敲一个字都会跑，不再扫一遍当月记录）
+    const used = monthStats(viewMonth).byCat[name] || 0;
     const over = cents > 0 && used > cents;
     inp.style.color = over ? 'var(--expense)' : 'var(--ink)';
     inp.style.fontWeight = over ? '700' : '400';
-    inp.style.borderBottomColor = over ? 'var(--expense)' : '#d5dbe6';
+    inp.style.borderBottomColor = over ? 'var(--expense)' : 'var(--line-strong)';
     renderHeader();
   });
 }
@@ -1057,6 +1071,21 @@ function bind(){
 bind();
 renderAll();
 
+
+/* ============ 明暗切换 ============
+ * CSS 变量会自动跟随系统切换，但 canvas 上已经画好的像素不会自己重画，
+ * 所以这里监听系统配色变化，重绘统计页（含趋势图与甜甜圈）。
+ */
+(function watchColorScheme(){
+  if(!window.matchMedia) return;
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const onChange = () => {
+    if(currentTab==='stats'){ renderStats(); statsDirty = false; }
+    else { statsDirty = true; }   // 记账页没有图表，等切到统计页再重绘
+  };
+  if(mq.addEventListener) mq.addEventListener('change', onChange);
+  else if(mq.addListener) mq.addListener(onChange);   // 老 Safari
+})();
 
 /* ============ 离线/服务 ============ */
 if('serviceWorker' in navigator){

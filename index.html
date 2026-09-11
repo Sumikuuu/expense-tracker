@@ -10,15 +10,22 @@
 <meta name="description" content="轻量月度流水记账与分类统计工具，支持微信/支付宝账单导入、预算管理与离线使用，数据只保存在本机。">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#5b8def">
+<!-- 暗色下把浏览器/系统状态栏也换成深色（不支持 media 的浏览器用上面那条） -->
+<meta name="theme-color" content="#12151b" media="(prefers-color-scheme: dark)">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="styles.css">
-<script src="vendor/pako.min.js"></script>
-<script src="parser.js"></script>
+<!-- 四个脚本都用 defer：不再阻塞首屏渲染，且 defer 严格按文档顺序执行（DOM 已解析完，
+     app.js 里那句 bind()/renderAll() 照旧能拿到全部节点）。
+     pako 只有导入 .xlsx 时才用得到，但它体积小且有离线缓存，暂不做按需加载。 -->
+<script defer src="vendor/pako.min.js"></script>
+<script defer src="parser.js"></script>
+<script defer src="stats.js"></script>
+<script defer src="app.js"></script>
 </head>
 <body>
 
 <noscript>
-  <div style="padding:24px 18px;font-size:15px;line-height:1.7;color:#1f2933;background:#fff8e6;border-bottom:1px solid #f5d986;">
+  <div class="noscript-warn">
     ⚠️ 这个记账工具依赖 JavaScript 运行，请在浏览器设置中启用 JavaScript 后重新打开。
   </div>
 </noscript>
@@ -30,7 +37,7 @@
       <button id="monthBtn" aria-label="选择月份" aria-haspopup="dialog"><span id="monthLabel">本月</span><span class="caret">▾</span></button>
       <button id="nextMonth" aria-label="下个月">›</button>
     </div>
-    <button id="backupBtn" title="备份 / 导入" aria-label="备份或导入" aria-haspopup="dialog">💾</button>
+    <button id="backupBtn" title="导入账单 / 备份与恢复" aria-haspopup="dialog"><span class="bk-ico" aria-hidden="true">🔄</span><span class="bk-txt">导入/导出</span></button>
   </div>
   <div class="summary">
     <div class="s-label">本月支出</div>
@@ -147,7 +154,7 @@
     <h2 id="confirmTitle">删除这条记录？</h2>
     <p class="confirm-note">删除后无法恢复，确定要删除吗？</p>
     <button class="save-btn" id="confirmDelBtn">确定删除</button>
-    <button class="delete-btn" id="confirmCancelBtn" style="color:var(--primary);background:#fff;border:1.5px solid var(--primary);">取消</button>
+    <button class="delete-btn btn-ghost" id="confirmCancelBtn">取消</button>
   </div>
 </div>
 
@@ -159,7 +166,7 @@
     <div class="pv-summary" id="pvSummary"></div>
     <div class="pv-list" id="pvList"></div>
     <button class="save-btn" id="pvConfirm">确认导入</button>
-    <button class="delete-btn" id="pvCancel" style="color:var(--primary);background:#fff;border:1.5px solid var(--primary);">取消</button>
+    <button class="delete-btn btn-ghost" id="pvCancel">取消</button>
     <div class="bk-tip" style="margin-top:12px;">重复的账单会自动跳过，无需担心。</div>
   </div>
 </div>
@@ -190,23 +197,22 @@
   </div>
 </div>
 
-<!-- 备份 / 导入 -->
+<!-- 导入 / 导出 -->
 <div class="overlay" id="backupOverlay">
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="backupTitle" tabindex="-1">
     <div class="grab"></div>
-    <h2 id="backupTitle">💾 备份 / 导入</h2>
+    <h2 id="backupTitle">🔄 导入 / 导出</h2>
     <div class="bk-item">
-      <button class="bk-export" id="bkExport">📤 导出备份</button>
-      <button class="bk-import" id="bkImport">📥 导入</button>
+      <button id="bkImport">📥 导入</button>
+      <button id="bkExport">📤 导出</button>
     </div>
     <div class="bk-tip">
-      📤 <b>导出备份</b>：保存全部账目到一个文件，可发给另一台设备。
-      <br>📥 <b>导入</b>：选账单（微信/支付宝 csv、xlsx）或备份（json），自动识别并合并。
+      📥 <b>导入</b>：选账单（微信/支付宝 csv、xlsx）或备份（json），自动识别并合并。
+      <br>📤 <b>导出</b>：保存全部账目到一个文件，可发给另一台设备。
       <br>🔒 数据仅保存在你的设备上，不上传任何服务器。
     </div>
   </div>
 </div>
 
-<script src="app.js"></script>
 </body>
 </html>
