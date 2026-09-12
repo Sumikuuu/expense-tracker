@@ -144,25 +144,23 @@ main{padding:16px 16px 0;max-width:680px;margin:0 auto;}
  * 连 1024px 桌面都还差 85px（要 ≥1109px 才放得下）。也就是说「横向滚动」
  * 并不是小屏的降级方案，而是唯一的模式 —— 这才是它在各种宽度下都别扭的原因。
  * 故按宽度分两种模式：
- *   窄屏（<600px）：保留单行横滑，但补上滑动吸附 + 右侧渐隐，让「右边还有」看得出来；
+ *   窄屏（<600px）：保留单行横滑，补上滑动吸附（滑完停在胶囊边界，不会卡在半截）。
+ *                   不做渐隐：只虚化右边而左边不虚化，两边看着不对称；
+ *                   右侧露出的半截胶囊本身就是「右边还有」的提示；
  *   宽屏（≥600px）：直接换行铺满，13 个分类一次全见，不再需要滚动。
  * 无需改 JS：滚轮横滚的处理本来就在「没有溢出时直接 return」，滚动位置也已有保留。 */
 .cat-filter{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 10px;margin-bottom:6px;
   -webkit-overflow-scrolling:touch;scrollbar-width:none;
-  scroll-snap-type:x proximity;
-  -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent);
-  mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent);}
+  scroll-snap-type:x proximity;}
 .cat-filter::-webkit-scrollbar{display:none;}
 .cat-filter .cf{flex-shrink:0;padding:7px 13px;border-radius:18px;border:1.5px solid var(--line);
   background:var(--card);font-size:13px;color:var(--ink-2);cursor:pointer;white-space:nowrap;
   font-family:inherit;scroll-snap-align:start;}
 .cat-filter .cf.sel{background:var(--cgbg,var(--sel-bg));border-color:var(--c,var(--primary));
   color:var(--c,var(--primary));font-weight:600;}
-/* 宽屏：改为换行铺满。横滑相关的三件事（溢出、吸附、渐隐）一并撤掉，
-   否则最后一行右侧会莫名其妙被淡掉 */
+/* 宽屏：改为换行铺满，横滑相关的设置（溢出、吸附）一并撤掉 */
 @media (min-width:600px){
-  .cat-filter{flex-wrap:wrap;overflow:visible;padding-bottom:2px;scroll-snap-type:none;
-    -webkit-mask-image:none;mask-image:none;}
+  .cat-filter{flex-wrap:wrap;overflow:visible;padding-bottom:2px;scroll-snap-type:none;}
 }
 .item .amt{font-size:16px;font-weight:700;white-space:nowrap;}
 .amt.expense{color:var(--expense);}
@@ -399,10 +397,8 @@ canvas#trend{width:100%;height:auto;aspect-ratio:640/220;}
   .save-btn:hover,.bk-item button:hover{filter:brightness(1.06);}
   button.fab:hover{transform:scale(1.05);}
   /* 桌面鼠标：窗口 ≥600px 时筛选条已换行、不会再溢出；只有把窗口拉窄到 600px 以下
-     才仍需横滑，此时给一条可见的细滚动条方便拖拽（触屏仍隐藏）。
-     同时去掉渐隐遮罩 —— 它会把这条滚动条一起淡掉。 */
-  .cat-filter{scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent;
-    -webkit-mask-image:none;mask-image:none;}
+     才仍需横滑，此时给一条可见的细滚动条方便拖拽（触屏仍隐藏） */
+  .cat-filter{scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent;}
   .cat-filter::-webkit-scrollbar{display:block;height:6px;}
   .cat-filter::-webkit-scrollbar-track{background:transparent;}
   .cat-filter::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:3px;}
